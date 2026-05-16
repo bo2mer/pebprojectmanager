@@ -400,12 +400,22 @@
         const generateId = () => Math.random().toString(36).substr(2, 9);
 
         const MOCK_DATA = [
-            { id: 'p1', parentId: null, type: 'Project', taskName: 'Website Redesign', pic: 'Alice', startDate: '2026.05.01', endDate: '2026.06.30', progress: 0, status: 'Not Started', remark: 'Main project', sortOrder: 1, predecessors: [] },
-            { id: 'm1', parentId: 'p1', type: 'Milestone', taskName: 'Design Approval', pic: '', startDate: '', endDate: '', progress: 0, status: '', remark: '', sortOrder: 2, predecessors: [], milestoneConfig: { type: 'star', items: [{ id: 'ms1', label: 'Sign-off', date: '2026.05.15', color: '#f59e0b' }] } },
-            { id: 't1', parentId: 'p1', type: 'Task', taskName: 'Design Phase', pic: 'Bob', startDate: '2026.05.01', endDate: '2026.05.15', progress: 0, status: 'Not Started', remark: '', sortOrder: 3, predecessors: [] },
-            { id: 'st1', parentId: 't1', type: 'Sub-task', taskName: 'Wireframing', pic: 'Charlie', startDate: '2026.05.01', endDate: '2026.05.07', progress: 100, status: 'Complete', remark: '', sortOrder: 4, predecessors: [] },
-            { id: 'st2', parentId: 't1', type: 'Sub-task', taskName: 'UI Mockups', pic: 'Bob', startDate: '2026.05.08', endDate: '2026.05.15', progress: 40, status: 'In Progress', remark: '', sortOrder: 5, predecessors: ['st1'] },
-            { id: 't2', parentId: 'p1', type: 'Task', taskName: 'Development Phase', pic: 'Dave', startDate: '2026.05.16', endDate: '2026.06.30', progress: 0, status: 'Not Started', remark: '', sortOrder: 6, predecessors: ['t1'] },
+            // Project 1: E-Commerce Platform
+            { id: 'p1', parentId: null, type: 'Project', taskName: 'E-Commerce Platform Launch', pic: 'Alice', startDate: '2026.05.01', endDate: '2026.06.15', progress: 40, status: 'In Progress', remark: 'High priority project', sortOrder: 1, predecessors: [] },
+            { id: 'p1_m1', parentId: 'p1', type: 'Milestone', taskName: 'Project Kickoff', pic: '', startDate: '', endDate: '', progress: 0, status: '', remark: '', sortOrder: 2, predecessors: [], milestoneConfig: { type: 'star', items: [{ id: 'ms1', label: 'Kickoff', date: '2026.05.01', color: '#10b981' }] } },
+            { id: 'p1_t1', parentId: 'p1', type: 'Task', taskName: 'UI/UX Design', pic: 'Bob', startDate: '2026.05.02', endDate: '2026.05.15', progress: 100, status: 'Complete', remark: '', sortOrder: 3, predecessors: [] },
+            { id: 'p1_st1', parentId: 'p1_t1', type: 'Sub-task', taskName: 'Wireframing', pic: 'Charlie', startDate: '2026.05.02', endDate: '2026.05.08', progress: 100, status: 'Complete', remark: '', sortOrder: 4, predecessors: [] },
+            { id: 'p1_st2', parentId: 'p1_t1', type: 'Sub-task', taskName: 'Prototyping', pic: 'Bob', startDate: '2026.05.09', endDate: '2026.05.15', progress: 100, status: 'Complete', remark: 'Client approved', sortOrder: 5, predecessors: ['p1_st1'] },
+            { id: 'p1_t2', parentId: 'p1', type: 'Task', taskName: 'Backend Development', pic: 'Dave', startDate: '2026.05.16', endDate: '2026.06.10', progress: 20, status: 'In Progress', remark: 'Database setup ongoing', sortOrder: 6, predecessors: ['p1_t1'] },
+            { id: 'p1_m2', parentId: 'p1', type: 'Milestone', taskName: 'Beta Release', pic: '', startDate: '', endDate: '', progress: 0, status: '', remark: '', sortOrder: 7, predecessors: [], milestoneConfig: { type: 'star', items: [{ id: 'ms2', label: 'V1.0 Beta', date: '2026.06.15', color: '#f59e0b' }] } },
+
+            // Project 2: Marketing Campaign
+            { id: 'p2', parentId: null, type: 'Project', taskName: 'Marketing Campaign Q3', pic: 'Eve', startDate: '2026.05.20', endDate: '2026.07.10', progress: 0, status: 'Not Started', remark: 'For new product line', sortOrder: 8, predecessors: [] },
+            { id: 'p2_t1', parentId: 'p2', type: 'Task', taskName: 'Market Research', pic: 'Eve', startDate: '2026.05.20', endDate: '2026.05.30', progress: 0, status: 'Not Started', remark: '', sortOrder: 9, predecessors: [] },
+            { id: 'p2_t2', parentId: 'p2', type: 'Task', taskName: 'Content Creation', pic: 'Frank', startDate: '2026.06.01', endDate: '2026.06.25', progress: 0, status: 'Not Started', remark: '', sortOrder: 10, predecessors: ['p2_t1'] },
+            { id: 'p2_st1', parentId: 'p2_t2', type: 'Sub-task', taskName: 'Write Blog Posts', pic: 'Grace', startDate: '2026.06.01', endDate: '2026.06.10', progress: 0, status: 'Not Started', remark: 'Need 5 articles', sortOrder: 11, predecessors: [] },
+            { id: 'p2_st2', parentId: 'p2_t2', type: 'Sub-task', taskName: 'Shoot Video Ads', pic: 'Frank', startDate: '2026.06.11', endDate: '2026.06.25', progress: 0, status: 'Not Started', remark: '', sortOrder: 12, predecessors: ['p2_st1'] },
+            { id: 'p2_m1', parentId: 'p2', type: 'Milestone', taskName: 'Campaign Go-Live', pic: '', startDate: '', endDate: '', progress: 0, status: '', remark: '', sortOrder: 13, predecessors: [], milestoneConfig: { type: 'arrow', items: [{ id: 'ms3', label: 'Live Period', startDate: '2026.06.26', endDate: '2026.07.10', color: '#ef4444' }] } },
         ];
 
         const ALL_COLUMNS = [
@@ -1970,15 +1980,8 @@
                         autoSizeColumns(data);
                         setIsLoaded(true);
                     } else {
-                        // ถ้าฐานข้อมูลว่างเปล่า (โหลดครั้งแรก) ให้เอาข้อมูลจำลองใส่ขึ้นไป
-                        const upgraded = MOCK_DATA.map(i => ({
-                            ...i, predecessors: i.predecessors || [], milestoneConfig: i.milestoneConfig || { type: 'star', items: [] }
-                        }));
-                        const finalInitialData = recalculateTree(upgraded);
-                        
-                        dbRef.set(finalInitialData); // ส่งขึ้น Firebase
-                        setItems(finalInitialData);
-                        autoSizeColumns(finalInitialData);
+                        // ถ้าไม่มีข้อมูลในฐานข้อมูลเลย ให้ตั้งเป็น Array ว่าง
+                        setItems([]);
                         setIsLoaded(true);
                     }
                 }, (error) => {
