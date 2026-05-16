@@ -1349,7 +1349,7 @@
 
                                 <div className="absolute top-0 bottom-0 pointer-events-none z-0" style={{ left: `${totalLeftWidth}px`, width: `${(totalDays + 1) * dayWidth}px` }}>
                                    {bottomLabels.map((lbl, i) => (
-                                        <div key={`grid-${i}`} className={`absolute top-0 bottom-0 border-r ${lbl.isWeekend && scale === 'day' ? 'bg-slate-50/50 border-slate-100' : 'border-slate-50'}`} style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}></div>
+                                       <div key={`grid-${i}`} className={`absolute top-0 bottom-0 border-r ${lbl.isWeekend && scale === 'day' ? 'bg-slate-50/50 border-slate-100' : 'border-slate-50'}`} style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}></div>
                                    ))}
                                 </div>
 
@@ -2088,7 +2088,7 @@
             const [scale, setScale] = useState('day');
             const [isLoaded, setIsLoaded] = useState(false);
             const [collapsedIds, setCollapsedIds] = useState([]);
-            const [frozenColumn, setFrozenColumn] = useState('taskName');
+            const [frozenColumn, setFrozenColumn] = useState('status');
             const [dbError, setDbError] = useState(null);
             const [colWidths, setColWidths] = useState({
                 taskName: 200, pic: 48, progress: 55, startDate: 80, endDate: 80, status: 75, remark: 90, act: 48
@@ -2329,6 +2329,14 @@
                         </div>
 
                         <div className="flex items-center gap-4">
+                            {view === 'gantt' && (
+                                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200/60 shadow-inner">
+                                    <button onClick={() => setScale('day')} className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${scale === 'day' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>Day</button>
+                                    <button onClick={() => setScale('week')} className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${scale === 'week' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>Week</button>
+                                    <button onClick={() => setScale('month')} className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${scale === 'month' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>Month</button>
+                                </div>
+                            )}
+
                             <div className="relative">
                                 <button onClick={() => setIsProjectFilterOpen(!isProjectFilterOpen)} className={`px-3 py-1.5 text-xs font-semibold rounded border flex items-center gap-1 ${!selectedProjects.includes('All') ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}>
                                     <Icons.Filter /> Projects {!selectedProjects.includes('All') && <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">{selectedProjects.length}</span>}
