@@ -67,7 +67,7 @@
             messagingSenderId: "944276281070",
             appId: "1:944276281070:web:06ed0cfcb7d0884f7085ff",
             measurementId: "G-1S1EVTSVJY",
-            databaseURL: "https://pebprojectmanager-default-rtdb.firebaseio.com" // เพิ่มเพื่อให้รองรับ Realtime DB ได้แน่นอน
+            databaseURL: "https://pebprojectmanager-default-rtdb.asia-southeast1.firebasedatabase.app" 
         };
         // เริ่มต้น Firebase ถ้ายังไม่เคยถูกเรียก
         if (!firebase.apps.length) {
@@ -1902,6 +1902,7 @@
             });
             const [picFilter, setPicFilter] = useState('All');
             const [statusFilter, setStatusFilter] = useState('All');
+            const [dbError, setDbError] = useState(null);
 
             const fileInputRef = useRef(null);
             const dragStartStateRef = useRef(null);
@@ -1980,6 +1981,9 @@
                         autoSizeColumns(finalInitialData);
                         setIsLoaded(true);
                     }
+                }, (error) => {
+                    console.error("Firebase Error:", error);
+                    setDbError(error.message);
                 });
 
                 // คืนค่าฟังก์ชันเพื่อหยุดฟังเมื่อ Component ถูกปิด
@@ -2201,6 +2205,27 @@
                 };
                 reader.readAsText(file);
             };
+
+            if (dbError) {
+                return (
+                    <div className="p-10 text-center flex flex-col items-center justify-center h-screen bg-slate-50">
+                        <div className="bg-rose-100 text-rose-700 p-6 rounded-xl max-w-lg shadow-sm border border-rose-200">
+                            <h2 className="text-xl font-bold mb-2 flex items-center justify-center gap-2">
+                                <Icons.Warning /> Database Connection Error
+                            </h2>
+                            <p className="mb-4 text-sm">{dbError}</p>
+                            <div className="text-left text-xs space-y-2 bg-white p-4 rounded border border-rose-100">
+                                <p><strong>วิธีแก้ปัญหาเบื้องต้น:</strong></p>
+                                <ol className="list-decimal pl-5 space-y-1">
+                                    <li>ไปที่ Firebase Console เลือก <b>Build &gt; Realtime Database</b> (ระวังอย่าสับสนกับ Firestore)</li>
+                                    <li>ไปที่แท็บ <b>Rules</b> และแก้โค้ดเป็น <code>{`{ "rules": { ".read": "true", ".write": "true" } }`}</code> แล้วกด Publish</li>
+                                    <li>ดู <b>ลิงก์ URL</b> ด้านบนสุดของหน้า Realtime Database ว่าตรงกับ <code>databaseURL</code> ในโค้ดหรือไม่ (โดยเฉพาะส่วนที่ลงท้ายด้วย <code>asia-southeast1.firebasedatabase.app</code>)</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
 
             if (!isLoaded) return <div className="p-10 text-center flex items-center justify-center h-screen"><span className="animate-pulse text-blue-500 font-bold">Connecting to Live Database...</span></div>;
 
