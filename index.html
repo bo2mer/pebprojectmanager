@@ -758,7 +758,9 @@
                     case 'act':
                         return (
                             <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-full items-center" style={{ width: `${colWidths.act}px` }}>
-                                <button onClick={(e) => onOpenAddMenu(e, item.id, item.type)} className="text-blue-500 hover:text-blue-700" title="Add Menu"><Icons.Add /></button>
+                                {!isMilestone && (
+                                    <button onClick={(e) => onOpenAddMenu(e, item.id, item.type)} className="text-blue-500 hover:text-blue-700" title="Add Menu"><Icons.Add /></button>
+                                )}
                                 <button onClick={() => onDelete(item.id)} className="text-rose-500 hover:text-rose-700" title="Delete"><Icons.Delete /></button>
                             </div>
                         );
@@ -1849,6 +1851,13 @@
                 const dates = [];
                 if (i.startDate) dates.push(parseDate(i.startDate));
                 if (i.endDate) dates.push(parseDate(i.endDate));
+                if (i.milestoneConfig && i.milestoneConfig.items) {
+                    i.milestoneConfig.items.forEach(mi => {
+                        if (mi.date) dates.push(parseDate(mi.date));
+                        if (mi.startDate) dates.push(parseDate(mi.startDate));
+                        if (mi.endDate) dates.push(parseDate(mi.endDate));
+                    });
+                }
                 return dates;
             });
 
@@ -1940,6 +1949,13 @@
                 return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getFullYear()}`;
             };
 
+            const hexToArgb = (hex) => {
+                if (!hex) return 'FF3B82F6';
+                let cleanHex = hex.replace('#', '');
+                if (cleanHex.length === 3) cleanHex = cleanHex.split('').map(c => c + c).join('');
+                return 'FF' + cleanHex.toUpperCase();
+            };
+
             exportItems.forEach((item, rowIndex) => {
                 const rowNumber = rowIndex + 3; 
                 const row = worksheet.getRow(rowNumber);
@@ -2000,6 +2016,7 @@
                 for (let i = 0; i < datesArray.length; i++) {
                     const d = datesArray[i];
                     d.setHours(0,0,0,0);
+                    const dStr = formatDate(d);
                     const colNumber = i + 9;
                     const cell = row.getCell(colNumber);
 
@@ -2010,17 +2027,36 @@
                     let isMilestoneCell = false;
                     if (item.type === 'Milestone') {
                         const config = item.milestoneConfig || { items: [] };
-                        const mItem = config.items.find(mi => {
-                            if (config.type === 'star' && mi.date) return parseDate(mi.date).getTime() === d.getTime();
-                            else if (config.type === 'arrow' && mi.startDate) return parseDate(mi.startDate).getTime() === d.getTime();
-                            return false;
-                        });
-
-                        if (mItem) {
-                            cellColor = 'FFF97316'; cellText = mItem.label || ''; fontColor = 'FFFFFFFF'; isMilestoneCell = true;
-                        } else {
-                            const inArrowRange = config.type === 'arrow' && config.items.some(mi => mi.startDate && mi.endDate && d > parseDate(mi.startDate) && d <= parseDate(mi.endDate));
-                            if (inArrowRange) { cellColor = 'FFF97316'; isMilestoneCell = true; }
+                        
+                        if (config.type === 'star') {
+                            const mItem = config.items.find(mi => mi.date && formatDate(parseDate(mi.date)) === dStr);
+                            if (mItem) {
+                                cellColor = hexToArgb(mItem.color || '#f59e0b');
+                                cellText = mItem.label || '';
+                                fontColor = 'FFFFFFFF';
+                                isMilestoneCell = true;
+                            }
+                        } else if (config.type === 'arrow') {
+                            let mItem = config.items.find(mi => mi.startDate && formatDate(parseDate(mi.startDate)) === dStr);
+                            if (mItem) {
+                                cellColor = hexToArgb(mItem.color || '#3b82f6');
+                                cellText = mItem.label || '';
+                                fontColor = 'FFFFFFFF';
+                                isMilestoneCell = true;
+                            } else {
+                                mItem = config.items.find(mi => {
+                                    if (!mi.startDate || !mi.endDate) return false;
+                                    const sDate = parseDate(mi.startDate);
+                                    const eDate = parseDate(mi.endDate);
+                                    sDate.setHours(0,0,0,0);
+                                    eDate.setHours(0,0,0,0);
+                                    return d > sDate && d <= eDate;
+                                });
+                                if (mItem) {
+                                    cellColor = hexToArgb(mItem.color || '#3b82f6');
+                                    isMilestoneCell = true;
+                                }
+                            }
                         }
                     }
 
@@ -2049,7 +2085,7 @@
                     if (cellText) {
                         cell.value = cellText;
                         cell.font = { name: 'Segoe UI', size: 8, color: { argb: fontColor }, bold: true };
-                        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
+                        cell.alignment = { vertical: 'middle', horizontal: isMilestoneCell ? 'center' : 'left', wrapText: false };
                     }
                 }
             });
@@ -2223,14 +2259,38 @@
             const handleAddChild = (targetId, newType, relation = 'child') => {
                 const target = items.find(i => i.id === targetId);
                 let parentId = relation === 'child' ? target.id : target.parentId;
-                const sortedItems = [...items].sort((a,b) => a.sortOrder - b.sortOrder);
+                
+                let newSortOrder;
+                if (newType === 'Milestone' && target.type === 'Project' && relation === 'child') {
+                    const projectChildren = items.filter(i => i.parentId === target.id).sort((a,b) => a.sortOrder - b.sortOrder);
+                    const projectMilestones = projectChildren.filter(i => i.type === 'Milestone');
+                    
+                    if (projectMilestones.length > 0) {
+                        newSortOrder = projectMilestones[projectMilestones.length - 1].sortOrder + 0.001;
+                    } else if (projectChildren.length > 0) {
+                        newSortOrder = projectChildren[0].sortOrder - 0.001;
+                    } else {
+                        newSortOrder = target.sortOrder + 0.001;
+                    }
+                } else if (relation === 'sibling') {
+                    newSortOrder = target.sortOrder + 0.001;
+                } else {
+                    newSortOrder = Math.max(0, ...items.map(i => i.sortOrder)) + 1;
+                }
+
                 const newItem = {
                     id: generateId(), parentId, type: newType, taskName: `New ${newType}`, 
                     pic: target.pic || '', startDate: target.startDate || getTodayStr(), endDate: target.endDate || addDays(getTodayStr(), 2), 
-                    progress: 0, status: 'Not Started', remark: '', sortOrder: sortedItems.length + 1, predecessors: [],
+                    progress: 0, status: 'Not Started', remark: '', sortOrder: newSortOrder, predecessors: [],
                     milestoneConfig: { type: 'star', items: [] }
                 };
-                updateState([...items, newItem], null, true);
+                
+                let updatedItems = [...items, newItem].map(i => ({...i}));
+                updatedItems.sort((a,b) => a.sortOrder - b.sortOrder).forEach((item, index) => {
+                    item.sortOrder = index + 1;
+                });
+
+                updateState(updatedItems, null, true);
             };
 
             const handleAddNewRoot = (e) => {
