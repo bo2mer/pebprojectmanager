@@ -2600,9 +2600,11 @@
                                         )}
                                     </div>
 
-                                    <button onClick={() => setIsHolidayModalOpen(true)} className="px-3 py-1.5 text-xs font-semibold rounded border flex items-center gap-1 bg-white border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors">
-                                        <Icons.Calendar /> Calendar Settings
-                                    </button>
+                                    {isEditMode && (
+                                        <button onClick={() => setIsHolidayModalOpen(true)} className="px-3 py-1.5 text-xs font-semibold rounded border flex items-center gap-1 bg-white border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors">
+                                            <Icons.Calendar /> Calendar Settings
+                                        </button>
+                                    )}
 
                                     {isEditMode && (
                                         <button onClick={handleUndo} disabled={history.length === 0} className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Undo last action">
