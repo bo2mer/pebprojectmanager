@@ -12,6 +12,10 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Firebase Compat SDKs (ทำงานเข้ากับไฟล์เดียวได้ดีกว่า) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
     
     <style>
         body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; overflow: hidden; background: #f8fafc; }
@@ -53,6 +57,24 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // --- FIREBASE INITIALIZATION ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCc6nrhGaOF6O7W3zPzAwZ6yCsxgsYUReQ",
+            authDomain: "pebprojectmanager.firebaseapp.com",
+            projectId: "pebprojectmanager",
+            storageBucket: "pebprojectmanager.firebasestorage.app",
+            messagingSenderId: "944276281070",
+            appId: "1:944276281070:web:06ed0cfcb7d0884f7085ff",
+            measurementId: "G-1S1EVTSVJY",
+            databaseURL: "https://pebprojectmanager-default-rtdb.firebaseio.com" // เพิ่มเพื่อให้รองรับ Realtime DB ได้แน่นอน
+        };
+        // เริ่มต้น Firebase ถ้ายังไม่เคยถูกเรียก
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.database();
+        // -------------------------------
 
         const parseDate = (dateStr) => {
             if (!dateStr) return new Date();
@@ -1918,29 +1940,7 @@
             };
 
             useEffect(() => {
-                const saved = localStorage.getItem('gantt_v1_data');
-                let initialData = MOCK_DATA;
-                
-                if (saved) {
-                    try {
-                        const parsed = JSON.parse(saved);
-                        initialData = parsed;
-                    } catch(e) { console.error("Error loading data", e); }
-                }
-
-                // Upgrade legacy formatting
-                const upgraded = initialData.map(i => ({
-                    ...i, 
-                    predecessors: i.predecessors || [],
-                    milestoneConfig: i.milestoneConfig || { type: 'star', items: [] }
-                }));
-
-                // BUG FIX: Recalculate tree on initial load to ensure Status relies on current date accurately
-                const finalInitialData = recalculateTree(upgraded);
-                
-                setItems(finalInitialData);
-                autoSizeColumns(finalInitialData);
-
+                // 1. โหลดการตั้งค่ามุมมองของแต่ละคนจาก LocalStorage
                 const savedWidths = localStorage.getItem('gantt_v1_col_widths');
                 if (savedWidths) {
                     try { 
@@ -1959,16 +1959,40 @@
                 const savedFreeze = localStorage.getItem('gantt_v1_frozen_col');
                 if (savedFreeze) setFrozenColumn(savedFreeze);
 
-                setIsLoaded(true);
+                // 2. เชื่อมต่อ Firebase เพื่อโหลดและฟังการเปลี่ยนแปลงข้อมูลแบบ Real-time
+                const dbRef = db.ref('projects/main/items');
+                
+                const unsubscribe = dbRef.on('value', (snapshot) => {
+                    if (snapshot.exists()) {
+                        const data = snapshot.val();
+                        setItems(data);
+                        autoSizeColumns(data);
+                        setIsLoaded(true);
+                    } else {
+                        // ถ้าฐานข้อมูลว่างเปล่า (โหลดครั้งแรก) ให้เอาข้อมูลจำลองใส่ขึ้นไป
+                        const upgraded = MOCK_DATA.map(i => ({
+                            ...i, predecessors: i.predecessors || [], milestoneConfig: i.milestoneConfig || { type: 'star', items: [] }
+                        }));
+                        const finalInitialData = recalculateTree(upgraded);
+                        
+                        dbRef.set(finalInitialData); // ส่งขึ้น Firebase
+                        setItems(finalInitialData);
+                        autoSizeColumns(finalInitialData);
+                        setIsLoaded(true);
+                    }
+                });
+
+                // คืนค่าฟังก์ชันเพื่อหยุดฟังเมื่อ Component ถูกปิด
+                return () => dbRef.off('value', unsubscribe);
             }, []);
 
             useEffect(() => {
                 if (isLoaded) {
-                    localStorage.setItem('gantt_v1_data', JSON.stringify(items));
+                    // เซฟเฉพาะการตั้งค่า UI เก็บลงเบราว์เซอร์
                     localStorage.setItem('gantt_v1_col_widths', JSON.stringify(colWidths));
                     localStorage.setItem('gantt_v1_frozen_col', frozenColumn);
                 }
-            }, [items, colWidths, frozenColumn, isLoaded]);
+            }, [colWidths, frozenColumn, isLoaded]);
 
             const startPreview = () => {
                 if (!dragStartStateRef.current) {
@@ -1998,8 +2022,12 @@
                     dragStartStateRef.current = null; 
                 }
                 
+                // อัปเดต state ตัวเองให้ทำงานลื่นไหล
                 setItems(finalItems);
                 autoSizeColumns(finalItems);
+
+                // ยิงข้อมูลขึ้น Firebase เพื่ออัปเดตให้เครื่องอื่นแบบ Real-time
+                db.ref('projects/main/items').set(finalItems);
             };
 
             const handleUndo = () => {
@@ -2174,14 +2202,14 @@
                 reader.readAsText(file);
             };
 
-            if (!isLoaded) return <div className="p-10 text-center flex items-center justify-center h-screen"><span className="animate-pulse text-blue-500 font-bold">Loading Data...</span></div>;
+            if (!isLoaded) return <div className="p-10 text-center flex items-center justify-center h-screen"><span className="animate-pulse text-blue-500 font-bold">Connecting to Live Database...</span></div>;
 
             return (
                 <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-800 overflow-hidden">
                     
-                    <div className="bg-amber-100 text-amber-800 px-4 py-2 text-xs flex justify-center items-center gap-2 border-b border-amber-200">
-                        <Icons.Warning />
-                        <span><strong>Offline Mode:</strong> Data is saved only in this browser. Please <b>Export to CSV / Excel</b> to share or backup your project plan.</span>
+                    <div className="bg-emerald-100 text-emerald-800 px-4 py-2 text-xs flex justify-center items-center gap-2 border-b border-emerald-200">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                        <span><strong>Live Collab Mode:</strong> เชื่อมต่อฐานข้อมูลสำเร็จ ทุกการเปลี่ยนแปลงจะอัปเดตให้ทุกคนเห็นแบบ Real-time</span>
                     </div>
 
                     <header className="bg-white border-b border-slate-200 shadow-sm px-6 py-3 flex items-center justify-between z-40">
