@@ -42,15 +42,16 @@
         
         .dependency-line {
             stroke: #94a3b8;
-            stroke-width: 1.5;
+            stroke-width: 1;
             fill: none;
-            stroke-dasharray: 4;
+            stroke-linecap: round;
+            stroke-dasharray: 2, 4;
             animation: dash 20s linear infinite;
         }
         
         .dependency-line.solid {
             stroke: #cbd5e1;
-            stroke-dasharray: none;
+            stroke-dasharray: 2, 4;
             animation: none;
         }
 
