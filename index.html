@@ -7,15 +7,17 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>tailwind.config = { corePlugins: { preflight: true } }</script>
+    
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase Compat SDKs (ทำงานเข้ากับไฟล์เดียวได้ดีกว่า) -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <!-- Firebase Compat SDKs (ทำงานร่วมกับโครงสร้างไฟล์เดียวและ React-Babel ได้ดีที่สุด) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     
     <style>
         body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; overflow: hidden; background: #f8fafc; }
@@ -35,6 +37,2260 @@
         
         .dependency-line {
             stroke: #94a3b8;
+            stroke-width: 1.5;
+            fill: none;
+            stroke-dasharray: 4;
+            animation: dash 20s linear infinite;
+        }
+        
+        .dependency-line.solid {
+            stroke: #cbd5e1;
+            stroke-dasharray: none;
+            animation: none;
+        }
+
+        @keyframes dash {
+            to { stroke-dashoffset: 400; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const firebaseConfig = {
+            apiKey: "AIzaSyCc6nrhGaOF6O7W3zPzAwZ6yCsxgsYUReQ",
+            authDomain: "pebprojectmanager.firebaseapp.com",
+            projectId: "pebprojectmanager",
+            storageBucket: "pebprojectmanager.firebasestorage.app",
+            messagingSenderId: "944276281070",
+            appId: "1:944276281070:web:06ed0cfcb7d0884f7085ff",
+            measurementId: "G-1S1EVTSVJY",
+            databaseURL: "https://pebprojectmanager-default-rtdb.asia-southeast1.firebasedatabase.app/"
+        };
+
+        // เริ่มต้น Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        const { useState, useEffect, useRef } = React;
+
+        const parseDate = (dateStr) => {
+            if (!dateStr) return new Date();
+            const [y, m, d] = dateStr.split('.');
+            return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        };
+
+        const formatDate = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}.${m}.${d}`;
+        };
+
+        const getTodayStr = () => formatDate(new Date());
+
+        const addDays = (dateStr, days) => {
+            const d = parseDate(dateStr);
+            d.setDate(d.getDate() + days);
+            return formatDate(d);
+        };
+
+        const diffDays = (startStr, endStr) => {
+            const start = parseDate(startStr);
+            const end = parseDate(endStr);
+            const diffTime = Math.abs(end - start);
+            return Math.round(diffTime / (1000 * 60 * 60 * 24));
+        };
+
+        const shortDate = (dateStr) => {
+            if (!dateStr) return '';
+            const d = parseDate(dateStr);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = d.toLocaleDateString('en-US', { month: 'short' });
+            const year = String(d.getFullYear()).substring(2);
+            return `${day} ${month} ${year}`;
+        };
+
+        const calculateStatus = (progress, startDateStr, endDateStr) => {
+            if (progress >= 100) return 'Complete';
+            if (!startDateStr || !endDateStr) return 'Not Started';
+
+            const start = parseDate(startDateStr);
+            const end = parseDate(endDateStr);
+            const evalDate = new Date(); 
+            evalDate.setHours(0, 0, 0, 0); 
+
+            if (evalDate < start) {
+                if (progress > 0) return 'In Progress';
+                return 'Not Started';
+            }
+
+            const totalDurationDays = diffDays(startDateStr, endDateStr) + 1;
+            const elapsedDays = diffDays(startDateStr, formatDate(evalDate)); 
+
+            let percentPlan = 100;
+
+            if (totalDurationDays > 0) {
+                percentPlan = (elapsedDays / totalDurationDays) * 100;
+                percentPlan = Math.max(0, Math.min(100, percentPlan)); 
+            }
+
+            if (progress < (percentPlan - 0.5)) return 'Delay';
+            if (progress > 0) return 'In Progress';
+            return 'Not Started';
+        };
+
+        const recalculateTree = (items) => {
+            let newItems = JSON.parse(JSON.stringify(items));
+            const getChildren = (parentId) => newItems.filter(item => item.parentId === parentId);
+
+            const calcNode = (node) => {
+                const children = getChildren(node.id);
+                children.forEach(child => calcNode(child));
+
+                if (children.length === 0 || node.type === 'Milestone') {
+                    if (node.type !== 'Milestone') {
+                        node.status = calculateStatus(node.progress, node.startDate, node.endDate);
+                    }
+                    return node;
+                }
+                
+                let totalProgressWeight = 0;
+                let totalDuration = 0;
+                let minStart = null;
+                let maxEnd = null;
+                let validChildrenCount = 0;
+                
+                let hasDelay = false;
+                let hasInProgress = false;
+                let allComplete = true;
+
+                children.forEach(child => {
+                    if (child.type !== 'Milestone') {
+                        const startD = parseDate(child.startDate);
+                        const endD = parseDate(child.endDate);
+                        if (!minStart || startD < minStart) minStart = startD;
+                        if (!maxEnd || endD > maxEnd) maxEnd = endD;
+                        
+                        const duration = diffDays(child.startDate, child.endDate) + 1;
+                        totalProgressWeight += (child.progress * duration);
+                        totalDuration += duration;
+                        
+                        if (child.status === 'Delay') hasDelay = true;
+                        if (child.status === 'In Progress') hasInProgress = true;
+                        if (child.status !== 'Complete') allComplete = false;
+                        
+                        validChildrenCount++;
+                    }
+                });
+
+                if (validChildrenCount > 0) {
+                    if (totalDuration > 0) {
+                        node.progress = totalProgressWeight / totalDuration;
+                    } else {
+                        node.progress = totalProgressWeight / validChildrenCount;
+                    }
+                    if (minStart) node.startDate = formatDate(minStart);
+                    if (maxEnd) node.endDate = formatDate(maxEnd);
+                    
+                    if (hasDelay) {
+                        node.status = 'Delay';
+                    } else if (allComplete) {
+                        node.status = 'Complete';
+                    } else if (hasInProgress || node.progress > 0) {
+                        node.status = 'In Progress';
+                    } else {
+                        node.status = 'Not Started';
+                    }
+                } else {
+                    node.status = calculateStatus(node.progress, node.startDate, node.endDate);
+                }
+                return node;
+            };
+
+            const rootNodes = newItems.filter(item => !item.parentId);
+            rootNodes.forEach(root => calcNode(root));
+            return newItems;
+        };
+
+        const cascadeDependencies = (items, startNodeId) => {
+            let currentItems = JSON.parse(JSON.stringify(items));
+            let loopGuard = 0;
+            let changed = true;
+
+            currentItems = recalculateTree(currentItems);
+
+            while (changed && loopGuard < 100) {
+                changed = false;
+                loopGuard++;
+
+                for (let i = 0; i < currentItems.length; i++) {
+                    const task = currentItems[i];
+                    if (!task.predecessors || task.predecessors.length === 0) continue;
+
+                    const isParent = currentItems.some(c => c.parentId === task.id && c.type !== 'Milestone');
+                    if (isParent) continue;
+
+                    let maxEndDateStr = null;
+                    task.predecessors.forEach(predId => {
+                        const pred = currentItems.find(p => p.id === predId);
+                        if (pred && pred.endDate && (!maxEndDateStr || pred.endDate > maxEndDateStr)) {
+                            maxEndDateStr = pred.endDate;
+                        }
+                    });
+
+                    if (maxEndDateStr) {
+                        const expectedStartD = parseDate(maxEndDateStr);
+                        expectedStartD.setDate(expectedStartD.getDate() + 1); 
+                        const expectedStartStr = formatDate(expectedStartD);
+
+                        if (task.startDate && task.startDate < expectedStartStr) {
+                            const diffDaysSigned = diffDays(task.startDate, expectedStartStr);
+                            
+                            if (task.startDate) task.startDate = addDays(task.startDate, diffDaysSigned);
+                            if (task.endDate) task.endDate = addDays(task.endDate, diffDaysSigned);
+                            
+                            changed = true;
+                        }
+                    }
+                }
+                
+                if (changed) {
+                    currentItems = recalculateTree(currentItems);
+                }
+            }
+            return currentItems;
+        };
+
+        const CSV_HEADER = "ID,ParentID,Type,TaskName,PIC,Status,Progress,StartDate,EndDate,Remark,SortOrder,Predecessors";
+
+        const exportToCSV = (items) => {
+            let csvContent = "data:text/csv;charset=utf-8," + CSV_HEADER + "\n";
+            items.sort((a,b) => a.sortOrder - b.sortOrder).forEach(item => {
+                const preds = (item.predecessors || []).join(';');
+                const row = [
+                    item.id, item.parentId || "", item.type, `"${item.taskName.replace(/"/g, '""')}"`,
+                    `"${item.pic || ''}"`, item.status || '', Math.round(item.progress || 0), item.startDate || '', item.endDate || '',
+                    `"${item.remark || ''}"`, item.sortOrder, `"${preds}"`
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `project_export_${getTodayStr()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        const escapeXml = (unsafe) => {
+            if (unsafe === undefined || unsafe === null) return '';
+            return unsafe.toString().replace(/[<>&'"]/g, function (c) {
+                switch (c) {
+                    case '<': return '&lt;'; case '>': return '&gt;';
+                    case '&': return '&amp;'; case '\'': return '&apos;';
+                    case '"': return '&quot;'; default: return c;
+                }
+            });
+        };
+
+        const exportToExcel = (items) => {
+            const buildExportTree = (parentId, level) => {
+                return items
+                    .filter(i => i.parentId === parentId)
+                    .sort((a,b) => a.sortOrder - b.sortOrder)
+                    .flatMap(item => {
+                        const node = { ...item, level };
+                        return [node, ...buildExportTree(item.id, level + 1)];
+                    });
+            };
+            const exportItems = buildExportTree(null, 0);
+
+            let xml = `<?xml version="1.0"?>
+            <?mso-application progid="Excel.Sheet"?>
+            <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+             xmlns:o="urn:schemas-microsoft-com:office:office"
+             xmlns:x="urn:schemas-microsoft-com:office:excel"
+             xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+             <Styles>
+              <Style ss:ID="Default" ss:Name="Normal">
+               <Alignment ss:Vertical="Bottom"/>
+               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>
+              </Style>
+              <Style ss:ID="sHeader">
+               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#FFFFFF" ss:Bold="1"/>
+               <Interior ss:Color="#4F81BD" ss:Pattern="Solid"/>
+              </Style>
+              <Style ss:ID="sProject">
+               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>
+               <Interior ss:Color="#DCE6F1" ss:Pattern="Solid"/>
+              </Style>
+              <Style ss:ID="sPercent">
+               <NumberFormat ss:Format="0%"/>
+              </Style>
+              <Style ss:ID="sProjectPercent">
+               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>
+               <Interior ss:Color="#DCE6F1" ss:Pattern="Solid"/>
+               <NumberFormat ss:Format="0%"/>
+              </Style>
+             </Styles>
+             <Worksheet ss:Name="Project Schedule">
+              <Table>
+               <Column ss:Width="80"/>
+               <Column ss:Width="200"/>
+               <Column ss:Width="80"/>
+               <Column ss:Width="80"/>
+               <Column ss:Width="80"/>
+               <Column ss:Width="60"/>
+               <Column ss:Width="80"/>
+               <Column ss:Width="200"/>
+               <Row>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Type</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Task Name</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">PIC</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Status</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Progress</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Start Date</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">End Date</Data></Cell>
+                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Remark</Data></Cell>
+               </Row>`;
+
+            exportItems.forEach(item => {
+                const isProj = item.type === 'Project';
+                const styleId = isProj ? 'sProject' : 'Default';
+                const stylePercentId = isProj ? 'sProjectPercent' : 'sPercent';
+                const indent = "&#160;&#160;&#160;&#160;".repeat(item.level);
+
+                xml += `
+                 <Row>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.type)}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${indent}${escapeXml(item.taskName)}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.pic)}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.status)}</Data></Cell>
+                  <Cell ss:StyleID="${stylePercentId}"><Data ss:Type="Number">${Math.round(item.progress || 0) / 100}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.startDate)}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.endDate)}</Data></Cell>
+                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.remark)}</Data></Cell>
+                 </Row>`;
+            });
+
+            xml += `
+              </Table>
+             </Worksheet>
+            </Workbook>`;
+
+            const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `ProjectPlan_${getTodayStr()}.xls`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+
+        const ALL_COLUMNS = [
+            { id: 'taskName', label: 'Task Name' },
+            { id: 'pic', label: 'PIC' },
+            { id: 'status', label: 'Status', center: true },
+            { id: 'progress', label: '%', center: true },
+            { id: 'startDate', label: 'Start' },
+            { id: 'endDate', label: 'End' },
+            { id: 'remark', label: 'Remark' },
+            { id: 'act', label: 'Act', center: true }
+        ];
+
+        const Icons = {
+            Project: () => <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>,
+            Task: () => <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>,
+            'Sub-task': () => <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>,
+            Milestone: () => <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>,
+            Add: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>,
+            Delete: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>,
+            Warning: () => <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>,
+            Undo: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>,
+            Dashboard: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>,
+            Gantt: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>,
+            Download: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>,
+            Upload: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>,
+            Excel: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>,
+            Pin: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"></path></svg>
+        };
+
+        const Dashboard = ({ items }) => {
+            const tasks = items.filter(i => i.type !== 'Project' && i.type !== 'Milestone');
+            const delayedTasks = tasks.filter(t => t.status === 'Delay');
+            const completeTasks = tasks.filter(t => t.status === 'Complete');
+            
+            const totalProgress = items.filter(i => i.type === 'Project').reduce((acc, curr, _, arr) => acc + (curr.progress / arr.length), 0);
+
+            return (
+                <div className="p-6 overflow-y-auto h-full bg-slate-50">
+                    <h2 className="text-2xl font-bold text-slate-800 mb-6">Dashboard Overview</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span className="text-slate-500 text-sm font-medium mb-1">Overall Progress</span>
+                            <span className="text-4xl font-bold text-blue-600">{Math.round(totalProgress || 0)}%</span>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span className="text-slate-500 text-sm font-medium mb-1">Total Tasks</span>
+                            <span className="text-4xl font-bold text-slate-700">{tasks.length}</span>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span className="text-slate-500 text-sm font-medium mb-1">Delayed Tasks</span>
+                            <span className="text-4xl font-bold text-rose-500">{delayedTasks.length}</span>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span className="text-slate-500 text-sm font-medium mb-1">Completed</span>
+                            <span className="text-4xl font-bold text-emerald-500">{completeTasks.length}</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Delayed Tasks Action List</h3>
+                            {delayedTasks.length === 0 ? (
+                                <p className="text-slate-500 text-sm">No delayed tasks! Good job.</p>
+                            ) : (
+                                <ul className="space-y-3">
+                                    {delayedTasks.map(t => (
+                                        <li key={t.id} className="flex justify-between items-center p-3 bg-rose-50 rounded-lg">
+                                            <div>
+                                                <span className="font-medium text-slate-800 block">{t.taskName}</span>
+                                                <span className="text-xs text-slate-500">PIC: {t.pic} | Due: {t.endDate}</span>
+                                            </div>
+                                            <span className="px-2 py-1 bg-rose-100 text-rose-700 text-xs font-bold rounded">Delay</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Project Summaries</h3>
+                            <ul className="space-y-4">
+                                {items.filter(i => i.type === 'Project').map(p => (
+                                    <li key={p.id}>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-medium text-slate-800 flex items-center gap-2">
+                                                <Icons.Project /> {p.taskName}
+                                            </span>
+                                            <span className="text-sm font-semibold">{Math.round(p.progress || 0)}%</span>
+                                        </div>
+                                        <div className="w-full bg-slate-100 rounded-full h-2">
+                                            <div className={`bg-blue-600 h-2 rounded-full`} style={{ width: `${p.progress || 0}%` }}></div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GanttRow = ({ item, level, minDate, dayWidth, onUpdateField, onOpenAddMenu, onDelete, updateDates, onPreviewDates, allItems, toggleCollapse, colWidths, totalLeftWidth, onContextMenu, isDrawingTarget, completeDrawing, scrollContainerRef, frozenColumn, handleAddNewRoot }) => {
+            const [localItem, setLocalItem] = useState(item);
+            const [dragState, setDragState] = useState({ active: false, deltaX: 0, type: null });
+            const [isEditingRemark, setIsEditingRemark] = useState(false);
+            
+            const currentDeltaDaysRef = useRef(0);
+            
+            useEffect(() => { 
+                if (!dragState.active) {
+                    setLocalItem(item); 
+                }
+            }, [item, dragState.active]);
+
+            const handleBlur = (field, forceValue) => {
+                const valToSave = forceValue !== undefined ? forceValue : localItem[field];
+                if (valToSave !== item[field]) {
+                    onUpdateField(item.id, field, valToSave);
+                }
+            };
+
+            const handleChange = (field, val) => {
+                setLocalItem(prev => ({...prev, [field]: val}));
+            };
+
+            const handleKeyDown = (field, e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.target.blur(); 
+                }
+            };
+
+            const Icon = Icons[item.type] || Icons.Task;
+            const isMilestone = item.type === 'Milestone';
+            
+            let baseLeft = 0;
+            let baseWidth = 0;
+            let startOffset = 0;
+            let duration = 0;
+
+            if (!isMilestone && localItem.startDate && localItem.endDate) {
+                startOffset = diffDays(formatDate(minDate), localItem.startDate);
+                duration = diffDays(localItem.startDate, localItem.endDate) + 1;
+                baseLeft = startOffset * dayWidth;
+                baseWidth = duration * dayWidth;
+            }
+
+            const statusColors = {
+                'Complete': { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+                'Delay': { bg: 'bg-rose-100', text: 'text-rose-700' },
+                'In Progress': { bg: 'bg-blue-100', text: 'text-blue-700' },
+                'Not Started': { bg: 'bg-slate-100', text: 'text-slate-700' }
+            }[localItem.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
+
+            const barTheme = {
+                'Complete': { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-800' },
+                'Delay': { bg: 'bg-rose-100', border: 'border-rose-300', text: 'text-rose-800' },
+                'In Progress': { bg: 'bg-blue-100', border: 'border-blue-300', text: 'text-blue-800' },
+                'Not Started': { bg: 'bg-slate-100', border: 'border-slate-300', text: 'text-slate-800' },
+            }[item.status] || { bg: 'bg-slate-100', border: 'border-slate-300', text: 'text-slate-800' };
+
+            const handleDateChange = (field, e) => {
+                const val = e.target.value;
+                const formattedDate = val ? val.replace(/-/g, '.') : getTodayStr();
+                handleChange(field, formattedDate);
+                handleBlur(field, formattedDate);
+            };
+
+            const handleInteraction = (e, type) => {
+                if (e.button === 2) return;
+                if (isMilestone) return; 
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (isDrawingTarget && type === 'move') {
+                    completeDrawing(item.id);
+                    return;
+                }
+
+                const startX = e.clientX;
+                const initialStart = localItem.startDate;
+                const initialEnd = localItem.endDate;
+                const initialProgress = localItem.progress || 0;
+                const initialScrollLeft = scrollContainerRef.current ? scrollContainerRef.current.scrollLeft : 0;
+                
+                currentDeltaDaysRef.current = 0;
+                let lastClientX = startX;
+
+                const updateDrag = (clientX) => {
+                    if (type === 'progress') {
+                         const scrollDelta = scrollContainerRef.current ? scrollContainerRef.current.scrollLeft - initialScrollLeft : 0;
+                         const totalDeltaX = (clientX - startX) + scrollDelta;
+                         const deltaPercent = (totalDeltaX / Math.max(baseWidth, dayWidth)) * 100;
+                         let newProg = Math.round(initialProgress + deltaPercent);
+                         newProg = Math.max(0, Math.min(100, newProg));
+                         setLocalItem(prev => ({...prev, progress: newProg}));
+                    } else {
+                         const currentScrollLeft = scrollContainerRef.current ? scrollContainerRef.current.scrollLeft : 0;
+                         const deltaX = (clientX - startX) + (currentScrollLeft - initialScrollLeft);
+                         
+                         setDragState({ active: true, deltaX, type });
+                         
+                         const deltaDays = Math.round(deltaX / dayWidth);
+                         if (deltaDays !== currentDeltaDaysRef.current) {
+                             currentDeltaDaysRef.current = deltaDays;
+                             
+                             let newStart = initialStart;
+                             let newEnd = initialEnd;
+
+                             if (type === 'move') {
+                                 newStart = addDays(initialStart, deltaDays);
+                                 newEnd = addDays(initialEnd, deltaDays);
+                             } else if (type === 'resize-left') {
+                                 newStart = addDays(initialStart, deltaDays);
+                                 if (newStart > newEnd) newStart = newEnd;
+                             } else if (type === 'resize-right') {
+                                 newEnd = addDays(initialEnd, deltaDays);
+                                 if (newEnd < newStart) newEnd = newStart;
+                             }
+                             
+                             onPreviewDates(item.id, newStart, newEnd);
+                         }
+                    }
+                };
+
+                let rafId = null;
+                const scrollLoop = () => {
+                    const scrollEl = scrollContainerRef.current;
+                    if (scrollEl) {
+                        const scrollRect = scrollEl.getBoundingClientRect();
+                        const edgeThreshold = 80;
+                        const maxSpeed = 15;
+                        let speed = 0;
+                        
+                        const frozenColIndex = ALL_COLUMNS.findIndex(c => c.id === frozenColumn);
+                        const frozenCols = ALL_COLUMNS.slice(0, frozenColIndex + 1);
+                        const currentFrozenWidth = frozenCols.reduce((sum, col) => sum + colWidths[col.id], 0);
+
+                        const visibleLeftEdge = scrollRect.left + Math.max(currentFrozenWidth, totalLeftWidth - scrollEl.scrollLeft);
+                        
+                        if (lastClientX < visibleLeftEdge + edgeThreshold) {
+                            const dist = (visibleLeftEdge + edgeThreshold) - lastClientX;
+                            speed = -Math.min(maxSpeed, (dist / edgeThreshold) * maxSpeed);
+                        } else if (lastClientX > scrollRect.right - edgeThreshold) {
+                            const dist = lastClientX - (scrollRect.right - edgeThreshold);
+                            speed = Math.min(maxSpeed, (dist / edgeThreshold) * maxSpeed);
+                        }
+
+                        if (speed !== 0) {
+                            scrollEl.scrollBy({ left: speed });
+                            updateDrag(lastClientX); 
+                        }
+                    }
+                    rafId = requestAnimationFrame(scrollLoop);
+                };
+
+                const onMouseMove = (moveEvent) => {
+                    lastClientX = moveEvent.clientX;
+                    updateDrag(lastClientX);
+                    
+                    if (type === 'progress' && !dragState.active) {
+                        setDragState({ active: true, deltaX: 0, type });
+                    }
+                };
+
+                const onMouseUp = (upEvent) => {
+                    lastClientX = upEvent.clientX;
+                    cancelAnimationFrame(rafId);
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+
+                    if (type === 'progress') {
+                         const scrollDelta = scrollContainerRef.current ? scrollContainerRef.current.scrollLeft - initialScrollLeft : 0;
+                         const totalDeltaX = (lastClientX - startX) + scrollDelta;
+                         const deltaPercent = (totalDeltaX / Math.max(baseWidth, dayWidth)) * 100;
+                         let newProg = Math.round(initialProgress + deltaPercent);
+                         newProg = Math.max(0, Math.min(100, newProg));
+                         handleBlur('progress', newProg);
+                    } else {
+                         const currentScrollLeft = scrollContainerRef.current ? scrollContainerRef.current.scrollLeft : 0;
+                         const deltaX = (lastClientX - startX) + (currentScrollLeft - initialScrollLeft);
+                         const deltaDays = Math.round(deltaX / dayWidth);
+                         
+                         if (deltaDays !== 0) {
+                             let newStart = initialStart;
+                             let newEnd = initialEnd;
+                             if (type === 'move') {
+                                 newStart = addDays(initialStart, deltaDays);
+                                 newEnd = addDays(initialEnd, deltaDays);
+                             } else if (type === 'resize-left') {
+                                 newStart = addDays(initialStart, deltaDays);
+                                 if (newStart > newEnd) newStart = newEnd;
+                             } else if (type === 'resize-right') {
+                                 newEnd = addDays(initialEnd, deltaDays);
+                                 if (newEnd < newStart) newEnd = newStart;
+                             }
+                             updateDates(item.id, newStart, newEnd);
+                         } else {
+                             setLocalItem(item);
+                             updateDates(item.id, initialStart, initialEnd);
+                         }
+                    }
+                    setDragState({ active: false, deltaX: 0, type: null });
+                };
+
+                if (type !== 'progress') {
+                    setDragState({ active: true, deltaX: 0, type });
+                }
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+                rafId = requestAnimationFrame(scrollLoop);
+            };
+
+            const canEditProgress = !item.isCalculatingParent && !isMilestone;
+
+            let renderLeft = baseLeft;
+            let renderWidth = Math.max(baseWidth, dayWidth);
+
+            if (dragState.active && !isMilestone) {
+                if (dragState.type === 'move') {
+                    renderLeft += dragState.deltaX;
+                } else if (dragState.type === 'resize-left') {
+                    const proposedLeft = baseLeft + dragState.deltaX;
+                    const maxLeft = baseLeft + baseWidth - dayWidth;
+                    renderLeft = Math.min(proposedLeft, maxLeft);
+                    renderWidth = baseWidth - (renderLeft - baseLeft);
+                } else if (dragState.type === 'resize-right') {
+                    const proposedWidth = baseWidth + dragState.deltaX;
+                    renderWidth = Math.max(dayWidth, proposedWidth);
+                }
+            }
+
+            const renderCell = (col) => {
+                switch (col.id) {
+                    case 'taskName':
+                        return (
+                            <div className="flex items-center gap-1 pr-1 shrink-0 h-full relative" style={{ width: `${colWidths.taskName}px`, paddingLeft: `${level * 1.5 + 0.5}rem` }}>
+                                <div className="w-4 flex justify-center items-center cursor-pointer text-slate-400 hover:text-slate-600 shrink-0" onClick={() => item.hasChildren && toggleCollapse(item.id)}>
+                                    {item.hasChildren ? (
+                                        <svg className={`w-3 h-3 transition-transform duration-200 ${item.isCollapsed ? '' : 'rotate-90'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+                                    ) : <span className="w-3"></span>}
+                                </div>
+                                <div className="relative w-5 h-5 flex items-center justify-center shrink-0 text-slate-500">
+                                    <Icon />
+                                </div>
+                                <input 
+                                    value={localItem.taskName}
+                                    onChange={e => handleChange('taskName', e.target.value)}
+                                    onBlur={() => handleBlur('taskName')}
+                                    onKeyDown={e => handleKeyDown('taskName', e)}
+                                    onContextMenu={(e) => {
+                                        if (isMilestone) {
+                                            e.preventDefault();
+                                            onContextMenu(e, item.id, 'milestoneConfig');
+                                        } else {
+                                            e.preventDefault();
+                                            onContextMenu(e, item.id, 'taskNameMenu');
+                                        }
+                                    }}
+                                    className={`flex-1 min-w-0 bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-500 rounded px-1 py-0.5 text-sm outline-none transition-all ${localItem.type === 'Project' ? 'font-semibold text-slate-800' : 'text-slate-600'} cursor-context-menu hover:text-blue-600`}
+                                    placeholder="Task Name"
+                                    title={isMilestone ? "Right click to configure Milestone" : "Right click for options"}
+                                />
+                            </div>
+                        );
+                    case 'pic':
+                        if (isMilestone) return <div style={{ width: `${colWidths.pic}px` }} className="shrink-0"></div>;
+                        return (
+                            <div className="px-1 shrink-0 h-full flex items-center" style={{ width: `${colWidths.pic}px` }}>
+                                <input 
+                                    value={localItem.pic || ''} 
+                                    onChange={e=>handleChange('pic', e.target.value)} 
+                                    onBlur={()=>handleBlur('pic')} 
+                                    onKeyDown={e => handleKeyDown('pic', e)}
+                                    className="w-full bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-500 rounded px-1 py-0.5 text-xs outline-none transition-all" 
+                                    placeholder="PIC"
+                                />
+                            </div>
+                        );
+                    case 'progress':
+                        if (isMilestone) return <div style={{ width: `${colWidths.progress}px` }} className="shrink-0"></div>;
+                        return (
+                            <div className="px-1 shrink-0 flex items-center justify-center gap-1 h-full" style={{ width: `${colWidths.progress}px` }}>
+                                <input 
+                                    type="number" min="0" max="100" 
+                                    value={Math.round(localItem.progress || 0)} 
+                                    onChange={e=>handleChange('progress', e.target.value)} 
+                                    onBlur={()=>handleBlur('progress')} 
+                                    onKeyDown={e => handleKeyDown('progress', e)}
+                                    disabled={!canEditProgress} 
+                                    className={`w-full bg-transparent border border-transparent ${!canEditProgress ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-300 focus:bg-white focus:border-blue-500'} rounded px-1 py-0.5 text-xs outline-none transition-all text-center`} 
+                                />
+                            </div>
+                        );
+                    case 'startDate':
+                        if (isMilestone) return <div style={{ width: `${colWidths.startDate}px` }} className="shrink-0"></div>;
+                        return (
+                            <div className="px-1 relative flex items-center group/date shrink-0 h-full" style={{ width: `${colWidths.startDate}px` }}>
+                                {item.isCalculatingParent ? (
+                                    <div className="w-full px-1 py-0.5 text-[11px] font-medium text-slate-400 cursor-not-allowed truncate">
+                                        {shortDate(localItem.startDate)}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <input 
+                                            type="date"
+                                            value={(localItem.startDate || '').replace(/\./g, '-')} 
+                                            onChange={e => handleDateChange('startDate', e)} 
+                                            className="peer w-full bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-500 cursor-pointer rounded px-1 py-0.5 text-[11px] text-transparent focus:text-slate-700 outline-none transition-all [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:p-0 z-10" 
+                                        />
+                                        <span className="absolute left-1 pointer-events-none text-[11px] font-medium text-slate-600 peer-focus:hidden z-0 truncate">
+                                            {shortDate(localItem.startDate)}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
+                        );
+                    case 'endDate':
+                        if (isMilestone) return <div style={{ width: `${colWidths.endDate}px` }} className="shrink-0"></div>;
+                        return (
+                            <div className="px-1 relative flex items-center group/date shrink-0 h-full" style={{ width: `${colWidths.endDate}px` }}>
+                                {item.isCalculatingParent ? (
+                                    <div className="w-full px-1 py-0.5 text-[11px] font-medium text-slate-400 cursor-not-allowed truncate">
+                                        {shortDate(localItem.endDate)}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <input 
+                                            type="date"
+                                            value={(localItem.endDate || '').replace(/\./g, '-')} 
+                                            onChange={e => handleDateChange('endDate', e)} 
+                                            className="peer w-full bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-500 cursor-pointer rounded px-1 py-0.5 text-[11px] text-transparent focus:text-slate-700 outline-none transition-all [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:p-0 z-10" 
+                                        />
+                                        <span className="absolute left-1 pointer-events-none text-[11px] font-medium text-slate-600 peer-focus:hidden z-0 truncate">
+                                            {shortDate(localItem.endDate)}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
+                        );
+                    case 'status':
+                        if (isMilestone) return <div style={{ width: `${colWidths.status}px` }} className="shrink-0"></div>;
+                        return (
+                            <div className="px-1 shrink-0 flex items-center justify-center h-full" style={{ width: `${colWidths.status}px` }}>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${statusColors.bg} ${statusColors.text} truncate max-w-full`} title={localItem.status}>
+                                    {localItem.status}
+                                </span>
+                            </div>
+                        );
+                    case 'remark':
+                        return (
+                            <div className="px-1 relative shrink-0 h-full flex items-center" style={{ width: `${colWidths.remark}px` }}>
+                                <div 
+                                    onClick={() => setIsEditingRemark(true)}
+                                    className="w-full bg-transparent border border-transparent hover:bg-slate-100 hover:border-slate-300 rounded px-1 py-0.5 text-xs outline-none transition-all truncate cursor-pointer text-slate-600" 
+                                    title={localItem.remark || "Click to add note"}
+                                >
+                                    {localItem.remark 
+                                        ? (localItem.remark.length > 8 ? localItem.remark.substring(0, 8) + '...' : localItem.remark) 
+                                        : <span className="text-slate-400 italic">Add note...</span>}
+                                </div>
+
+                                {isEditingRemark && (
+                                    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsEditingRemark(false)}>
+                                        <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-96 p-5 flex flex-col" onClick={e => e.stopPropagation()}>
+                                            <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <Icon /> {item.taskName} - Remark
+                                            </h3>
+                                            <textarea
+                                                autoFocus
+                                                rows={5}
+                                                value={localItem.remark || ''}
+                                                onChange={e => handleChange('remark', e.target.value)}
+                                                className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none shadow-inner"
+                                                placeholder="Type your notes here..."
+                                            />
+                                            <div className="flex justify-end gap-2 mt-4">
+                                                <button onClick={() => {
+                                                    handleChange('remark', item.remark);
+                                                    setIsEditingRemark(false);
+                                                }} className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                                                <button onClick={() => { handleBlur('remark'); setIsEditingRemark(false); }} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors">Save Note</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    case 'act':
+                        return (
+                            <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-full items-center" style={{ width: `${colWidths.act}px` }}>
+                                <button onClick={(e) => onOpenAddMenu(e, item.id, item.type)} className="text-emerald-500 hover:text-emerald-700" title="Add Sub-task"><Icons.Add /></button>
+                                <button onClick={() => onDelete(item.id)} className="text-rose-500 hover:text-rose-700" title="Delete"><Icons.Delete /></button>
+                            </div>
+                        );
+                    default: return null;
+                }
+            };
+
+            const frozenColIndex = ALL_COLUMNS.findIndex(c => c.id === frozenColumn);
+            const frozenCols = ALL_COLUMNS.slice(0, frozenColIndex + 1);
+            const scrollableCols = ALL_COLUMNS.slice(frozenColIndex + 1);
+            
+            const currentFrozenWidth = frozenCols.reduce((sum, col) => sum + colWidths[col.id], 0);
+            const scrollableLeftWidth = totalLeftWidth - currentFrozenWidth;
+
+            return (
+                <div className="flex border-b border-slate-100 group h-7 items-center relative">
+                    <div className={`flex-none flex items-center bg-white border-r border-slate-200 sticky left-0 group-hover:bg-blue-50 transition-colors isolate ${isEditingRemark ? 'z-30' : 'z-50'} shadow-[4px_0_12px_rgba(0,0,0,0.03)] h-full`} style={{ width: `${currentFrozenWidth}px` }}>
+                        {frozenCols.map(col => <React.Fragment key={`frozen-${col.id}`}>{renderCell(col)}</React.Fragment>)}
+                    </div>
+
+                    <div className={`flex-none flex items-center bg-white border-r border-slate-200 group-hover:bg-blue-50 transition-colors isolate ${isEditingRemark ? 'z-[100]' : 'z-40'} h-full`} style={{ width: `${scrollableLeftWidth}px` }}>
+                        {scrollableCols.map(col => <React.Fragment key={`scroll-${col.id}`}>{renderCell(col)}</React.Fragment>)}
+                    </div>
+
+                    <div className="flex-1 relative h-full group-hover:bg-slate-50/50 transition-colors">
+                        {isMilestone ? (
+                            <>
+                                {item.milestoneConfig?.type === 'star' && item.milestoneConfig.items?.map((star, idx) => {
+                                    if (!star.date) return null;
+                                    const offset = diffDays(formatDate(minDate), star.date);
+                                    const leftPos = (offset * dayWidth) + (dayWidth / 2);
+                                    return (
+                                        <div key={`star-${idx}`} className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex flex-col items-center group/mstone cursor-pointer" style={{ left: `${leftPos}px` }}>
+                                            <svg className="w-3.5 h-3.5 transition-transform duration-200 group-hover/mstone:scale-[1.8] group-hover/mstone:-translate-y-1" fill={star.color || '#f59e0b'} viewBox="0 0 24 24">
+                                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                            </svg>
+                                            <span className="text-[8px] font-bold text-slate-700 whitespace-nowrap mt-0.5 leading-none transition-all duration-200 group-hover/mstone:scale-[1.8] group-hover/mstone:-translate-y-2 group-hover/mstone:bg-white/90 group-hover/mstone:px-1 group-hover/mstone:rounded group-hover/mstone:shadow-sm">
+                                                {star.label}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                                
+                                {item.milestoneConfig?.type === 'arrow' && item.milestoneConfig.items?.map((arrow, idx) => {
+                                    if (!arrow.startDate || !arrow.endDate) return null;
+                                    const sOffset = diffDays(formatDate(minDate), arrow.startDate);
+                                    const eOffset = diffDays(formatDate(minDate), arrow.endDate);
+                                    const sLeft = (sOffset * dayWidth) + (dayWidth / 2);
+                                    const eLeft = (eOffset * dayWidth) + (dayWidth / 2);
+                                    const aWidth = Math.max(0, eLeft - sLeft);
+                                    
+                                    return (
+                                        <div key={`arrow-${idx}`} className="absolute top-1/2 -translate-y-1/2 z-10 flex flex-col group/mstone cursor-pointer" style={{ left: `${sLeft}px` }}>
+                                            <div className="flex items-center transition-transform duration-200 group-hover/mstone:scale-105 origin-left" style={{ width: `${aWidth}px` }}>
+                                                <div className="h-1 flex-1" style={{ backgroundColor: arrow.color || '#3b82f6' }}></div>
+                                                <div className="w-0 h-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-l-[6px]" style={{ borderLeftColor: arrow.color || '#3b82f6' }}></div>
+                                            </div>
+                                            <span className="text-[8px] font-bold text-slate-700 whitespace-nowrap mt-0.5 leading-none transition-all duration-200 group-hover/mstone:scale-[1.8] origin-bottom-left group-hover/mstone:bg-white/90 group-hover/mstone:px-1 group-hover/mstone:rounded group-hover/mstone:shadow-sm absolute top-full left-0">
+                                                {arrow.label}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </>
+                        ) : (
+                            localItem.startDate && localItem.endDate && (
+                                <div 
+                                    id={`bar-${item.id}`}
+                                    className={`absolute top-1/2 -translate-y-1/2 h-5 rounded-sm shadow-sm border text-[10px] flex items-center ${isDrawingTarget ? 'ring-2 ring-indigo-500 drop-shadow-md animate-pulse' : ''} ${barTheme.bg} ${barTheme.border} ${barTheme.text} ${(dragState.active && dragState.type !== 'progress') ? 'z-20 ring-2 ring-white/50 drop-shadow-md' : 'z-10'}`}
+                                    style={{ left: `${renderLeft}px`, width: `${renderWidth}px` }}
+                                    title={`${item.taskName}\nStart: ${item.startDate}\nEnd: ${item.endDate}\nProgress: ${Math.round(localItem.progress || 0)}%`}
+                                    onContextMenu={e => onContextMenu(e, item.id, 'task')}
+                                >
+                                    <div className={`bg-emerald-400 h-full absolute left-0 top-0 rounded-l-[1px] ${localItem.progress === 100 ? 'rounded-r-[1px]' : ''} ${dragState.type === 'progress' ? '' : 'transition-all duration-200'} z-10`} style={{ width: `${localItem.progress || 0}%` }}></div>
+                                    
+                                    {canEditProgress && (
+                                        <div 
+                                            className="absolute top-0 bottom-0 w-6 cursor-col-resize z-40 flex items-end justify-center group/prog pb-0 translate-y-[8px]"
+                                            style={{ left: `calc(${localItem.progress || 0}% - 12px)` }}
+                                            onMouseDown={e => handleInteraction(e, 'progress')}
+                                            title="Adjust Progress (%)"
+                                        >
+                                            <div className="w-3.5 h-3.5 bg-white border border-blue-500 rounded-full shadow-sm opacity-0 group-hover:opacity-100 group-hover/prog:bg-blue-50 transition-all flex items-center justify-center">
+                                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full group-hover/prog:scale-110 transition-transform"></div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {!item.isCalculatingParent && (
+                                        <div 
+                                            className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize z-50 flex items-center justify-start group/res-l -translate-x-1" 
+                                            onMouseDown={e => handleInteraction(e, 'resize-left')}
+                                            title="Adjust Start Date"
+                                        >
+                                            <div className="w-1.5 h-3.5 bg-white border border-slate-400 rounded-[2px] shadow-sm opacity-0 group-hover:opacity-100 group-hover/res-l:border-blue-500 group-hover/res-l:bg-blue-50 transition-all flex items-center justify-center gap-[1px]">
+                                                <div className="w-[1px] h-2 bg-slate-400 group-hover/res-l:bg-blue-500 transition-colors"></div>
+                                                <div className="w-[1px] h-2 bg-slate-400 group-hover/res-l:bg-blue-500 transition-colors"></div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div 
+                                        className={`absolute inset-0 flex items-center px-2 truncate z-20 ${!item.isCalculatingParent ? 'cursor-grab active:cursor-grabbing' : ''} ${isDrawingTarget ? 'cursor-crosshair' : ''}`}
+                                        onMouseDown={e => {
+                                            if (isDrawingTarget) handleInteraction(e, 'move');
+                                            else if (!item.isCalculatingParent) handleInteraction(e, 'move');
+                                        }}
+                                    >
+                                        {renderWidth > 30 && <span className="font-semibold drop-shadow-sm pointer-events-none select-none relative z-20 truncate block">{item.taskName} {Math.round(localItem.progress || 0)}%</span>}
+                                    </div>
+
+                                    {!item.isCalculatingParent && (
+                                        <div 
+                                            className="absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize z-50 flex items-center justify-end group/res-r translate-x-1" 
+                                            onMouseDown={e => handleInteraction(e, 'resize-right')}
+                                            title="Adjust End Date"
+                                        >
+                                            <div className="w-1.5 h-3.5 bg-white border border-slate-400 rounded-[2px] shadow-sm opacity-0 group-hover:opacity-100 group-hover/res-r:border-blue-500 group-hover/res-r:bg-blue-50 transition-all flex items-center justify-center gap-[1px]">
+                                                <div className="w-[1px] h-2 bg-slate-400 group-hover/res-r:bg-blue-500 transition-colors"></div>
+                                                <div className="w-[1px] h-2 bg-slate-400 group-hover/res-r:bg-blue-500 transition-colors"></div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const GanttChart = ({ items, scale, onUpdateField, onAddChild, onDelete, updateDates, previewDates, collapsedIds, toggleCollapse, colWidths, setColWidths, handleAddDependency, handleRemoveDependencies, frozenColumn, setFrozenColumn, picFilter, statusFilter, handleAddNewRoot }) => {
+            const chartRef = useRef(null);
+            const scrollRef = useRef(null);
+            const allDates = items.flatMap(i => {
+                const dates = [];
+                if (i.startDate) dates.push(parseDate(i.startDate));
+                if (i.endDate) dates.push(parseDate(i.endDate));
+                if (i.milestoneConfig?.items) {
+                    i.milestoneConfig.items.forEach(mi => {
+                        if (mi.date) dates.push(parseDate(mi.date));
+                        if (mi.startDate) dates.push(parseDate(mi.startDate));
+                        if (mi.endDate) dates.push(parseDate(mi.endDate));
+                    });
+                }
+                return dates;
+            });
+            let minDate = new Date();
+            let maxDate = new Date();
+            
+            if (allDates.length > 0) {
+                minDate = new Date(Math.min(...allDates));
+                maxDate = new Date(Math.max(...allDates));
+            }
+            
+            minDate.setDate(minDate.getDate() - 7);
+            maxDate.setDate(maxDate.getDate() + 14);
+
+            const totalDays = diffDays(formatDate(minDate), formatDate(maxDate));
+            const scales = { day: 30, week: 10, month: 3 };
+            const dayWidth = scales[scale] || 30;
+
+            const buildTree = (parentId, level) => {
+                return items
+                    .filter(i => {
+                        if (i.parentId !== parentId) return false;
+                        if (parentId === null) {
+                            let passPic = true;
+                            let passStatus = true;
+                            if (picFilter !== 'All') passPic = i.pic === picFilter;
+                            if (statusFilter !== 'All') passStatus = i.status === statusFilter;
+                            return passPic && passStatus;
+                        }
+                        return true;
+                    })
+                    .sort((a,b) => a.sortOrder - b.sortOrder)
+                    .flatMap(item => {
+                        const hasChildren = items.some(i => i.parentId === item.id);
+                        const hasDependentChildren = items.some(i => i.parentId === item.id && i.type !== 'Milestone');
+                        const isCollapsed = collapsedIds.includes(item.id);
+                        const isCalculatingParent = hasDependentChildren && item.type !== 'Milestone';
+                        const node = { ...item, level, hasChildren, isCollapsed, isCalculatingParent };
+                        if (isCollapsed) return [node];
+                        return [node, ...buildTree(item.id, level + 1)];
+                    });
+            };
+            const displayItems = buildTree(null, 0);
+
+            const headers = [];
+            let currentDate = new Date(minDate);
+            for (let i = 0; i <= totalDays; i++) {
+                headers.push(new Date(currentDate));
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            const topLabels = [];
+            const bottomLabels = [];
+
+            if (scale === 'day') {
+                let curMonth = null;
+                headers.forEach((d, i) => {
+                    const mKey = d.getFullYear() + '-' + d.getMonth();
+                    if (!curMonth || curMonth.key !== mKey) {
+                        if (curMonth) topLabels.push(curMonth);
+                        curMonth = { key: mKey, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), start: i, width: 1 };
+                    } else {
+                        curMonth.width++;
+                    }
+                    bottomLabels.push({ label: d.getDate(), start: i, width: 1, isWeekend: d.getDay() === 0 || d.getDay() === 6 });
+                });
+                if (curMonth) topLabels.push(curMonth);
+            } else if (scale === 'week') {
+                let curMonth = null;
+                let curWeek = null;
+                headers.forEach((d, i) => {
+                    const mKey = d.getFullYear() + '-' + d.getMonth();
+                    if (!curMonth || curMonth.key !== mKey) {
+                        if (curMonth) topLabels.push(curMonth);
+                        curMonth = { key: mKey, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), start: i, width: 1 };
+                    } else {
+                        curMonth.width++;
+                    }
+                    
+                    const isMonday = d.getDay() === 1;
+                    if (!curWeek || isMonday || d.getDate() === 1) { 
+                        if (curWeek) bottomLabels.push(curWeek);
+                        const wn = Math.ceil(d.getDate() / 7);
+                        curWeek = { label: `Week ${wn}`, start: i, width: 1 };
+                    } else {
+                        curWeek.width++;
+                    }
+                });
+                if (curMonth) topLabels.push(curMonth);
+                if (curWeek) bottomLabels.push(curWeek);
+            } else if (scale === 'month') {
+                let curYear = null;
+                let curMonth = null;
+                headers.forEach((d, i) => {
+                    const yKey = d.getFullYear();
+                    if (!curYear || curYear.key !== yKey) {
+                        if (curYear) topLabels.push(curYear);
+                        curYear = { key: yKey, label: d.getFullYear(), start: i, width: 1 };
+                    } else {
+                        curYear.width++;
+                    }
+                    const mKey = d.getMonth();
+                    if (!curMonth || curMonth.key !== mKey) {
+                        if (curMonth) bottomLabels.push(curMonth);
+                        curMonth = { key: mKey, label: d.toLocaleDateString('en-US', { month: 'short' }), start: i, width: 1 };
+                    } else {
+                        curMonth.width++;
+                    }
+                });
+                if (curYear) topLabels.push(curYear);
+                if (curMonth) bottomLabels.push(curMonth);
+            }
+
+            const totalLeftWidth = Object.values(colWidths).reduce((a, b) => a + b, 0);
+
+            const handleResizeStart = (e, col) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startWidth = colWidths[col];
+
+                const onMouseMove = (moveEvent) => {
+                    const delta = moveEvent.clientX - startX;
+                    setColWidths(prev => ({
+                        ...prev,
+                        [col]: Math.max(30, startWidth + delta)
+                    }));
+                };
+
+                const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            };
+
+            const frozenColIndex = ALL_COLUMNS.findIndex(c => c.id === frozenColumn);
+            const frozenCols = ALL_COLUMNS.slice(0, frozenColIndex + 1);
+            const scrollableCols = ALL_COLUMNS.slice(frozenColIndex + 1);
+            
+            const currentFrozenWidth = frozenCols.reduce((sum, col) => sum + colWidths[col.id], 0);
+            const scrollableLeftWidth = totalLeftWidth - currentFrozenWidth;
+
+            const todayOffset = diffDays(formatDate(minDate), getTodayStr());
+            const todayLeft = todayOffset * dayWidth;
+
+            const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+            const [drawingState, setDrawingState] = useState({ active: false, sourceId: null, currentX: 0, currentY: 0 });
+            
+            const [addMenu, setAddMenu] = useState({ visible: false, x: 0, y: 0, parentId: null, parentType: null });
+            
+            const [milestoneConfigMenu, setMilestoneConfigMenu] = useState({ visible: false, taskId: null });
+
+            const drawingRafRef = useRef(null);
+            const lastMousePosRef = useRef({x: 0, y: 0});
+
+            useEffect(() => {
+                const handleGlobalClick = (e) => {
+                    if (!e.target.closest('.context-menu-popup')) {
+                        setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                        setAddMenu({ visible: false, x: 0, y: 0, parentId: null, parentType: null });
+                    }
+                };
+                const handleKeyDown = (e) => {
+                    if (e.key === 'Escape') {
+                        if (drawingRafRef.current) cancelAnimationFrame(drawingRafRef.current);
+                        setDrawingState({ active: false, sourceId: null, currentX: 0, currentY: 0 });
+                        setMilestoneConfigMenu({ visible: false, taskId: null });
+                    }
+                };
+                const handleGlobalMouseUp = () => {
+                     setDrawingState(prev => {
+                         if (prev.active) {
+                             if (drawingRafRef.current) cancelAnimationFrame(drawingRafRef.current);
+                             return { active: false, sourceId: null, currentX: 0, currentY: 0 };
+                         }
+                         return prev;
+                     });
+                };
+                window.addEventListener('click', handleGlobalClick);
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('mouseup', handleGlobalMouseUp);
+                return () => {
+                    window.removeEventListener('click', handleGlobalClick);
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('mouseup', handleGlobalMouseUp);
+                };
+            }, []);
+
+            const handleContextMenu = (e, taskId, menuType) => {
+                e.preventDefault();
+                if (menuType === 'milestoneConfig') {
+                    setMilestoneConfigMenu({ visible: true, taskId });
+                } else {
+                    setContextMenu({
+                        visible: true,
+                        x: e.clientX,
+                        y: e.clientY,
+                        type: menuType,
+                        targetId: taskId,
+                        sourceId: null
+                    });
+                }
+            };
+
+            const handleLineContextMenu = (e, sourceId, targetId) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                    type: 'line',
+                    targetId: targetId,
+                    sourceId: sourceId
+                });
+            };
+            
+            const handleOpenAddMenu = (e, parentId, parentType) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (parentType === 'Milestone' || parentType === 'Task' || parentType === 'Sub-task') {
+                    let t = 'Task';
+                    if (parentType === 'Milestone') t = 'Milestone';
+                    else if (parentType === 'Task' || parentType === 'Sub-task') t = 'Sub-task';
+                    onAddChild(parentId, t);
+                    return;
+                }
+                
+                setAddMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                    parentId,
+                    parentType
+                });
+            };
+
+            const startDrawing = (sourceId) => {
+                setDrawingState({ active: true, sourceId, currentX: 0, currentY: 0 });
+                
+                const scrollLoop = () => {
+                    const scrollEl = scrollRef.current;
+                    if (scrollEl) { 
+                        const scrollRect = scrollEl.getBoundingClientRect();
+                        const edgeThreshold = 80;
+                        const maxSpeed = 15;
+                        let speed = 0;
+                        const { x: clientX, y: clientY } = lastMousePosRef.current;
+                        
+                        const visibleLeftEdge = scrollRect.left + Math.max(currentFrozenWidth, totalLeftWidth - scrollEl.scrollLeft);
+                        
+                        if (clientX > 0) { 
+                            if (clientX < visibleLeftEdge + edgeThreshold) {
+                                const dist = (visibleLeftEdge + edgeThreshold) - clientX;
+                                speed = -Math.min(maxSpeed, (dist / edgeThreshold) * maxSpeed);
+                            } else if (clientX > scrollRect.right - edgeThreshold) {
+                                const dist = clientX - (scrollRect.right - edgeThreshold);
+                                speed = Math.min(maxSpeed, (dist / edgeThreshold) * maxSpeed);
+                            }
+
+                            if (speed !== 0) {
+                                scrollEl.scrollBy({ left: speed });
+                            }
+                            
+                            setDrawingState(prev => {
+                                if(!prev.active) return prev;
+                                return {
+                                    ...prev,
+                                    currentX: clientX - scrollRect.left + scrollEl.scrollLeft - totalLeftWidth,
+                                    currentY: clientY - scrollRect.top + scrollEl.scrollTop - 56
+                                };
+                            });
+                        }
+                    }
+                    drawingRafRef.current = requestAnimationFrame(scrollLoop);
+                };
+                drawingRafRef.current = requestAnimationFrame(scrollLoop);
+            };
+
+            const completeDrawing = (targetId) => {
+                if (drawingRafRef.current) cancelAnimationFrame(drawingRafRef.current);
+                if (drawingState.sourceId && drawingState.sourceId !== targetId) {
+                    handleAddDependency(drawingState.sourceId, targetId);
+                }
+                setDrawingState({ active: false, sourceId: null, currentX: 0, currentY: 0 });
+            };
+
+            const handleChartMouseMove = (e) => {
+                if (!drawingState.active || !scrollRef.current) return;
+                lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+                const rect = scrollRef.current.getBoundingClientRect();
+                setDrawingState(prev => ({
+                    ...prev,
+                    currentX: e.clientX - rect.left + scrollRef.current.scrollLeft - totalLeftWidth,
+                    currentY: e.clientY - rect.top + scrollRef.current.scrollTop - 56
+                }));
+            };
+
+            const getTaskCoords = (taskId, position = 'right') => {
+                const index = displayItems.findIndex(i => i.id === taskId);
+                if (index === -1) return null;
+
+                const item = displayItems[index];
+                if (!item.startDate || !item.endDate) return null;
+                
+                const startOffset = diffDays(formatDate(minDate), item.startDate);
+                const duration = diffDays(item.startDate, item.endDate) + 1;
+                
+                const left = startOffset * dayWidth;
+                const width = duration * dayWidth;
+                
+                const y = (index * 28) + 14; 
+                const x = position === 'right' ? left + width : left;
+
+                return { x, y };
+            };
+
+            const createPath = (x1, y1, x2, y2) => {
+                const buffer = 15;
+                if (x2 > x1 + buffer) {
+                    return `M ${x1} ${y1} L ${x1 + buffer} ${y1} L ${x1 + buffer} ${y2} L ${x2} ${y2}`;
+                } else {
+                    const midY = y1 + (y2 - y1) / 2;
+                    return `M ${x1} ${y1} L ${x1 + buffer} ${y1} L ${x1 + buffer} ${midY} L ${x2 - buffer} ${midY} L ${x2 - buffer} ${y2} L ${x2} ${y2}`;
+                }
+            };
+            
+            const renderHeaderCell = (col) => (
+                <div key={`header-${col.id}`} style={{ width: `${colWidths[col.id]}px` }} className={`relative shrink-0 flex items-center group/col ${col.center ? 'justify-center' : 'px-1'} ${col.id === 'pic' || col.id === 'status' ? 'cursor-pointer hover:bg-slate-200/50' : ''}`} onClick={(e) => {
+                    if (col.id === 'pic' || col.id === 'status') {
+                        e.stopPropagation();
+                        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, type: `${col.id}Filter` });
+                    }
+                }}>
+                    {col.id === 'taskName' && (
+                        <button onClick={handleAddNewRoot} className="absolute top-0 left-0 text-blue-600 hover:text-blue-800 text-xs font-bold transition-colors z-[60] px-1 py-0.5">
+                            + New Project
+                        </button>
+                    )}
+                    <div className={`flex items-center gap-1 overflow-hidden w-full relative ${col.id === 'taskName' ? 'pt-5' : ''}`}>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setFrozenColumn(col.id); }} 
+                            className={`flex-none hover:text-blue-600 transition-colors ${frozenColumn === col.id ? 'text-blue-500 opacity-100' : 'text-slate-300 opacity-0 group-hover/col:opacity-100'}`}
+                            title="Pin to freeze panel here"
+                        >
+                            <Icons.Pin />
+                        </button>
+                        <span className={`truncate ${col.center ? 'text-center' : ''}`}>{col.label}</span>
+                        {(col.id === 'pic' && picFilter !== 'All') && <div className="absolute right-2 w-1.5 h-1.5 rounded-full bg-blue-500"></div>}
+                        {(col.id === 'status' && statusFilter !== 'All') && <div className="absolute right-2 w-1.5 h-1.5 rounded-full bg-blue-500"></div>}
+                    </div>
+                    <div className="absolute right-0 top-0 bottom-0 w-2 -mr-1 cursor-col-resize hover:bg-blue-400/50 z-10 opacity-0 group-hover/col:opacity-100 transition-opacity" onMouseDown={e => handleResizeStart(e, col.id)}></div>
+                </div>
+            );
+
+            return (
+                <div className="flex flex-col h-full bg-white overflow-hidden" ref={chartRef}>
+                    <div className="flex-1 overflow-auto flex relative" ref={scrollRef} onMouseMove={handleChartMouseMove}>
+                        <div className="min-w-max flex flex-col relative pb-32">
+                            
+                            <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-[60] h-14 shadow-sm">
+                                <div className="flex-none bg-slate-50 border-r border-slate-200 z-50 sticky left-0 flex items-end pb-2 isolate shadow-[4px_0_12px_rgba(0,0,0,0.03)]" style={{ width: `${currentFrozenWidth}px` }}>
+                                    <div className="flex w-full text-[11px] font-bold text-slate-500 uppercase tracking-wider items-center">
+                                        {frozenCols.map(col => renderHeaderCell(col))}
+                                    </div>
+                                </div>
+
+                                <div className="flex-none bg-slate-50 border-r border-slate-200 z-40 flex items-end pb-2" style={{ width: `${scrollableLeftWidth}px` }}>
+                                    <div className="flex w-full text-[11px] font-bold text-slate-500 uppercase tracking-wider items-center">
+                                        {scrollableCols.map(col => renderHeaderCell(col))}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex-1 relative overflow-hidden" style={{ width: `${(totalDays + 1) * dayWidth}px`, minWidth: '100%' }}>
+                                    <div className="absolute top-0 left-0 w-full h-7 border-b border-slate-200">
+                                        {topLabels.map((lbl, i) => (
+                                            <div key={`top-${i}`} className="absolute h-full flex items-center justify-center text-[11px] font-bold text-slate-700 border-r border-slate-200 px-1 overflow-hidden bg-slate-100/30" style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}>
+                                                <span className="truncate">{lbl.label}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="absolute top-7 left-0 w-full h-7">
+                                        {bottomLabels.map((lbl, i) => (
+                                            <div key={`bot-${i}`} className={`absolute h-full flex items-center justify-center text-[10px] font-medium border-r border-slate-200 px-1 overflow-hidden ${lbl.isWeekend && scale === 'day' ? 'text-slate-400 bg-slate-100/50' : 'text-slate-600'}`} style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}>
+                                                <span className="truncate">{lbl.label}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="relative">
+                                <svg className="absolute top-0 pointer-events-none" style={{ left: `${totalLeftWidth}px`, width: `${(totalDays + 1) * dayWidth}px`, height: '100%', zIndex: 5 }}>
+                                    <defs>
+                                        <marker id="arrowhead" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                            <polygon points="0 0, 6 2, 0 4" fill="#94a3b8" />
+                                        </marker>
+                                        <marker id="arrowhead-solid" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                            <polygon points="0 0, 6 2, 0 4" fill="#cbd5e1" />
+                                        </marker>
+                                    </defs>
+                                    
+                                    {displayItems.map(item => {
+                                        if (item.type === 'Milestone') return null; 
+                                        if (!item.predecessors || item.predecessors.length === 0) return null;
+                                        return item.predecessors.map(predId => {
+                                            const p1 = getTaskCoords(predId, 'right');
+                                            const p2 = getTaskCoords(item.id, 'left');
+                                            if (!p1 || !p2) return null;
+                                            return (
+                                                <g 
+                                                    key={`${predId}-${item.id}`} 
+                                                    className="cursor-pointer group"
+                                                    onContextMenu={(e) => handleLineContextMenu(e, predId, item.id)}
+                                                >
+                                                    <path 
+                                                        d={createPath(p1.x, p1.y, p2.x, p2.y)} 
+                                                        stroke="transparent" 
+                                                        strokeWidth="10" 
+                                                        fill="none" 
+                                                        className="pointer-events-auto"
+                                                    />
+                                                    <path 
+                                                        d={createPath(p1.x, p1.y, p2.x, p2.y)} 
+                                                        className="dependency-line solid pointer-events-none group-hover:stroke-rose-500 transition-colors"
+                                                        markerEnd="url(#arrowhead-solid)"
+                                                    />
+                                                </g>
+                                            );
+                                        });
+                                    })}
+
+                                    {drawingState.active && drawingState.sourceId && (
+                                        (() => {
+                                            const p1 = getTaskCoords(drawingState.sourceId, 'right');
+                                            if (!p1) return null;
+                                            const localMouseX = drawingState.currentX;
+                                            return (
+                                                <path 
+                                                    d={createPath(p1.x, p1.y, localMouseX, drawingState.currentY)} 
+                                                    className="dependency-line"
+                                                    markerEnd="url(#arrowhead)"
+                                                />
+                                            );
+                                        })()
+                                    )}
+                                </svg>
+
+                                {todayLeft > 0 && todayLeft < totalDays * dayWidth && (
+                                    <div 
+                                        className="absolute top-0 bottom-0 border-l-2 border-red-400 border-dashed z-30 pointer-events-none" 
+                                        style={{ left: `${totalLeftWidth + todayLeft}px` }}
+                                    >
+                                        <div className="bg-red-500 text-white text-[9px] px-1 rounded-b absolute top-0 -translate-x-1/2 shadow">TODAY</div>
+                                    </div>
+                                )}
+
+                                <div className="absolute top-0 bottom-0 pointer-events-none z-0" style={{ left: `${totalLeftWidth}px`, width: `${(totalDays + 1) * dayWidth}px` }}>
+                                   {bottomLabels.map((lbl, i) => (
+                                        <div key={`grid-${i}`} className={`absolute top-0 bottom-0 border-r ${lbl.isWeekend && scale === 'day' ? 'bg-slate-50/50 border-slate-100' : 'border-slate-50'}`} style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}></div>
+                                   ))}
+                                </div>
+
+                                {displayItems.map((item) => (
+                                    <GanttRow 
+                                        key={item.id} 
+                                        item={item} 
+                                        level={item.level} 
+                                        minDate={minDate} 
+                                        dayWidth={dayWidth} 
+                                        onUpdateField={onUpdateField}
+                                        onOpenAddMenu={handleOpenAddMenu}
+                                        onDelete={onDelete}
+                                        updateDates={updateDates}
+                                        onPreviewDates={previewDates}
+                                        allItems={items}
+                                        toggleCollapse={toggleCollapse}
+                                        colWidths={colWidths}
+                                        totalLeftWidth={totalLeftWidth}
+                                        onContextMenu={handleContextMenu}
+                                        isDrawingTarget={drawingState.active && drawingState.sourceId !== item.id}
+                                        completeDrawing={completeDrawing}
+                                        scrollContainerRef={scrollRef}
+                                        frozenColumn={frozenColumn}
+                                        handleAddNewRoot={handleAddNewRoot}
+                                    />
+                                ))}
+                                {displayItems.length === 0 && (
+                                    <div className="p-10 text-center text-slate-500 italic">No tasks found. Create a project to start tracking.</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Context Menu */}
+                    {contextMenu.visible && (
+                        <div 
+                            className="context-menu-popup fixed bg-white border border-slate-200 shadow-xl rounded-lg py-1 z-[9999] min-w-[160px] text-sm"
+                            style={{ top: contextMenu.y, left: contextMenu.x }}
+                        >
+                            {contextMenu.type === 'task' ? (
+                                <>
+                                    {(() => {
+                                        const targetTask = items.find(i => i.id === contextMenu.targetId);
+                                        if (targetTask && targetTask.type !== 'Milestone' && !displayItems.some(i => i.parentId === contextMenu.targetId)) {
+                                            return (
+                                                <>
+                                                    <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                                        Update Progress
+                                                    </div>
+                                                    <div className="px-4 py-2">
+                                                        <input 
+                                                            type="number" 
+                                                            min="0" max="100" 
+                                                            className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                            placeholder="%"
+                                                            defaultValue={Math.round(targetTask.progress || 0)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    let val = parseInt(e.target.value);
+                                                                    if (isNaN(val)) val = 0;
+                                                                    if (val > 100) val = 100;
+                                                                    if (val < 0) val = 0;
+                                                                    onUpdateField(contextMenu.targetId, 'progress', val);
+                                                                    setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                    <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                        Dependency
+                                    </div>
+                                    <button 
+                                        className="w-full text-left px-4 py-2 hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center gap-2"
+                                        onClick={() => {
+                                            startDrawing(contextMenu.targetId);
+                                            setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                        }}
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                        Add Dependency
+                                    </button>
+                                    
+                                    {(() => {
+                                        const tTask = displayItems.find(i => i.id === contextMenu.targetId);
+                                        const hasIncoming = tTask?.predecessors?.length > 0;
+                                        const hasOutgoing = displayItems.some(i => (i.predecessors || []).includes(contextMenu.targetId));
+                                        return (hasIncoming || hasOutgoing) ? (
+                                            <button 
+                                                className="w-full text-left px-4 py-2 hover:bg-rose-50 hover:text-rose-600 transition-colors flex items-center gap-2"
+                                                onClick={() => {
+                                                    handleRemoveDependencies(contextMenu.targetId);
+                                                    setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                                Remove Connections
+                                            </button>
+                                        ) : null;
+                                    })()}
+                                </>
+                            ) : contextMenu.type === 'line' ? (
+                                <>
+                                    <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                        Connection
+                                    </div>
+                                    <button 
+                                        className="w-full text-left px-4 py-2 hover:bg-rose-50 hover:text-rose-600 transition-colors flex items-center gap-2"
+                                        onClick={() => {
+                                            handleRemoveDependencies(contextMenu.targetId, contextMenu.sourceId);
+                                            setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                        }}
+                                    >
+                                        <Icons.Delete /> Delete Connection
+                                    </button>
+                                </>
+                            ) : contextMenu.type === 'taskNameMenu' ? (
+                                (() => {
+                                    const tsk = items.find(i => i.id === contextMenu.targetId);
+                                    if (!tsk) return null;
+                                    return (
+                                        <>
+                                            {tsk.type === 'Project' && (
+                                                <>
+                                                    <button 
+                                                        className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700"
+                                                        onClick={() => {
+                                                            onAddChild(tsk.id, 'Milestone');
+                                                            setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                        }}
+                                                    >
+                                                        <Icons.Milestone /> Add Milestone
+                                                    </button>
+                                                    <button 
+                                                        className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700"
+                                                        onClick={() => {
+                                                            onAddChild(tsk.id, 'Task');
+                                                            setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                        }}
+                                                    >
+                                                        <Icons.Task /> Add Task
+                                                    </button>
+                                                </>
+                                            )}
+                                            {(tsk.type === 'Task' || tsk.type === 'Sub-task') && (
+                                                <button 
+                                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700"
+                                                    onClick={() => {
+                                                        onAddChild(tsk.id, 'Sub-task');
+                                                        setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                    }}
+                                                >
+                                                    {Icons['Sub-task']()} Add Sub-task
+                                                </button>
+                                            )}
+                                            <button 
+                                                className="w-full text-left px-4 py-2 hover:bg-rose-50 hover:text-rose-600 transition-colors flex items-center gap-2"
+                                                onClick={() => {
+                                                    onDelete(contextMenu.targetId);
+                                                    setContextMenu({ visible: false, x: 0, y: 0, type: null, targetId: null, sourceId: null });
+                                                }}
+                                            >
+                                                <Icons.Delete /> Delete
+                                            </button>
+                                        </>
+                                    );
+                                })()
+                            ) : contextMenu.type === 'picFilter' ? (
+                                (() => {
+                                    const allPics = [...new Set(items.filter(i => i.type === 'Project' && i.pic && i.pic.trim() !== '').map(i => i.pic))].sort();
+                                    return (
+                                        <>
+                                            <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                                Filter by PIC
+                                            </div>
+                                            <button 
+                                                className={`w-full text-left px-4 py-1.5 hover:bg-slate-50 transition-colors flex items-center gap-2 ${picFilter === 'All' ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                                                onClick={() => { onUpdateField(null, 'FILTER_PIC', 'All'); setContextMenu({visible: false}); }}
+                                            >
+                                                Show All
+                                            </button>
+                                            {allPics.map(pic => (
+                                                <button 
+                                                    key={pic}
+                                                    className={`w-full text-left px-4 py-1.5 hover:bg-slate-50 transition-colors flex items-center gap-2 ${picFilter === pic ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                                                    onClick={() => { onUpdateField(null, 'FILTER_PIC', pic); setContextMenu({visible: false}); }}
+                                                >
+                                                    {pic}
+                                                </button>
+                                            ))}
+                                            {allPics.length === 0 && <div className="px-4 py-2 text-slate-400 italic text-xs">No PICs found</div>}
+                                        </>
+                                    );
+                                })()
+                            ) : contextMenu.type === 'statusFilter' ? (
+                                (() => {
+                                    const activeStatuses = new Set(items.filter(i => i.type === 'Project' && i.status).map(i => i.status));
+                                    const allStatuses = ['Not Started', 'In Progress', 'Delay', 'Complete'].filter(st => activeStatuses.has(st));
+                                    
+                                    return (
+                                        <>
+                                            <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                                Filter by Status
+                                            </div>
+                                            <button 
+                                                className={`w-full text-left px-4 py-1.5 hover:bg-slate-50 transition-colors flex items-center gap-2 ${statusFilter === 'All' ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                                                onClick={() => { onUpdateField(null, 'FILTER_STATUS', 'All'); setContextMenu({visible: false}); }}
+                                            >
+                                                Show All
+                                            </button>
+                                            {allStatuses.map(st => (
+                                                <button 
+                                                    key={st}
+                                                    className={`w-full text-left px-4 py-1.5 hover:bg-slate-50 transition-colors flex items-center gap-2 ${statusFilter === st ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                                                    onClick={() => { onUpdateField(null, 'FILTER_STATUS', st); setContextMenu({visible: false}); }}
+                                                >
+                                                    {st}
+                                                </button>
+                                            ))}
+                                        </>
+                                    );
+                                })()
+                            ) : null}
+                        </div>
+                    )}
+                    
+                    {/* Add Menu */}
+                    {addMenu.visible && (
+                        <div 
+                            className="context-menu-popup fixed bg-white border border-slate-200 shadow-xl rounded-lg py-1 z-[9999] min-w-[140px] text-sm"
+                            style={{ top: addMenu.y, left: addMenu.x }}
+                        >
+                            <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                                Add New...
+                            </div>
+                            {addMenu.parentType === 'Project' && (
+                                <>
+                                    <button className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2" onClick={() => { onAddChild(addMenu.parentId, 'Milestone'); setAddMenu({...addMenu, visible: false}); }}><Icons.Milestone /> Milestone</button>
+                                    <button className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2" onClick={() => { onAddChild(addMenu.parentId, 'Task'); setAddMenu({...addMenu, visible: false}); }}><Icons.Task /> Task</button>
+                                </>
+                            )}
+                            {addMenu.parentType === 'Task' && (
+                                <button className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2" onClick={() => { onAddChild(addMenu.parentId, 'Sub-task'); setAddMenu({...addMenu, visible: false}); }}>{Icons['Sub-task']()} Sub-task</button>
+                            )}
+                            {addMenu.parentType === 'Sub-task' && (
+                                <button className="w-full text-left px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2" onClick={() => { onAddChild(addMenu.parentId, 'Sub-task'); setAddMenu({...addMenu, visible: false}); }}>{Icons['Sub-task']()} Sub-task</button>
+                            )}
+                        </div>
+                    )}
+                    
+                    {/* Milestone Config Modal */}
+                    {milestoneConfigMenu.visible && (() => {
+                        const mTask = items.find(i => i.id === milestoneConfigMenu.taskId);
+                        if (!mTask) return null;
+                        const config = mTask.milestoneConfig || { type: 'star', items: [] };
+                        
+                        return (
+                            <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+                                <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-[500px] flex flex-col max-h-[80vh] overflow-hidden">
+                                    <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                        <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Milestone /> Configure Milestone: {mTask.taskName}</h3>
+                                        <button onClick={() => setMilestoneConfigMenu({visible: false, taskId: null})} className="text-slate-400 hover:text-slate-600"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                                    </div>
+                                    <div className="p-5 flex-1 overflow-y-auto">
+                                        <div className="mb-5 flex gap-4">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input type="radio" name="mtype" checked={config.type === 'star'} onChange={() => {
+                                                    onUpdateField(mTask.id, 'milestoneConfig', { ...config, type: 'star' });
+                                                }} />
+                                                <span className="font-medium text-sm">Star Marker</span>
+                                            </label>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input type="radio" name="mtype" checked={config.type === 'arrow'} onChange={() => {
+                                                    onUpdateField(mTask.id, 'milestoneConfig', { ...config, type: 'arrow' });
+                                                }} />
+                                                <span className="font-medium text-sm">Right Arrow Line</span>
+                                            </label>
+                                        </div>
+                                        
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="text-xs text-slate-500 bg-slate-50 uppercase">
+                                                <tr>
+                                                    <th className="px-2 py-2">Label</th>
+                                                    {config.type === 'star' ? <th className="px-2 py-2">Date</th> : <>
+                                                        <th className="px-2 py-2">Start Date</th>
+                                                        <th className="px-2 py-2">End Date</th>
+                                                    </>}
+                                                    <th className="px-2 py-2 w-16">Color</th>
+                                                    <th className="px-2 py-2 w-10"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {config.items.map((mItem, idx) => (
+                                                    <tr key={mItem.id || idx} className="border-b border-slate-100">
+                                                        <td className="p-1"><input type="text" value={mItem.label} onChange={e => {
+                                                            const newItems = [...config.items]; newItems[idx].label = e.target.value;
+                                                            onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                        }} className="w-full border border-slate-200 rounded px-2 py-1 text-xs" /></td>
+                                                        
+                                                        {config.type === 'star' ? (
+                                                            <td className="p-1"><input type="date" value={mItem.date ? mItem.date.replace(/\./g, '-') : ''} onChange={e => {
+                                                                const newItems = [...config.items]; newItems[idx].date = e.target.value.replace(/-/g, '.');
+                                                                onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                            }} className="w-full border border-slate-200 rounded px-2 py-1 text-xs" /></td>
+                                                        ) : (
+                                                            <>
+                                                                <td className="p-1"><input type="date" value={mItem.startDate ? mItem.startDate.replace(/\./g, '-') : ''} onChange={e => {
+                                                                    const newItems = [...config.items]; newItems[idx].startDate = e.target.value.replace(/-/g, '.');
+                                                                    onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                                }} className="w-full border border-slate-200 rounded px-2 py-1 text-xs" /></td>
+                                                                <td className="p-1"><input type="date" value={mItem.endDate ? mItem.endDate.replace(/\./g, '-') : ''} onChange={e => {
+                                                                    const newItems = [...config.items]; newItems[idx].endDate = e.target.value.replace(/-/g, '.');
+                                                                    onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                                }} className="w-full border border-slate-200 rounded px-2 py-1 text-xs" /></td>
+                                                            </>
+                                                        )}
+                                                        
+                                                        <td className="p-1"><input type="color" value={mItem.color || '#f59e0b'} onChange={e => {
+                                                            const newItems = [...config.items]; newItems[idx].color = e.target.value;
+                                                            onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                        }} className="w-full h-7 border-0 p-0 cursor-pointer rounded" /></td>
+                                                        <td className="p-1 text-center">
+                                                            <button onClick={() => {
+                                                                const newItems = config.items.filter((_, i) => i !== idx);
+                                                                onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                                            }} className="text-rose-500 hover:text-rose-700"><Icons.Delete /></button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        <button onClick={() => {
+                                            const newItems = [...config.items, { id: generateId(), label: 'New', color: config.type === 'star' ? '#f59e0b' : '#3b82f6', date: getTodayStr(), startDate: getTodayStr(), endDate: addDays(getTodayStr(), 2) }];
+                                            onUpdateField(mTask.id, 'milestoneConfig', { ...config, items: newItems });
+                                        }} className="mt-3 px-3 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded border border-slate-300 flex items-center gap-1">
+                                            <Icons.Add /> Add Item
+                                        </button>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                                        <button onClick={() => setMilestoneConfigMenu({visible: false, taskId: null})} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700">Done</button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                </div>
+            );
+        };
+
+        const parseCSVLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                const nextChar = line[i + 1];
+                
+                if (char === '"') {
+                    if (inQuotes && nextChar === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current);
+            return result;
+        };
+
+        const App = () => {
+            const [items, setItems] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [view, setView] = useState('gantt');
+            const [scale, setScale] = useState('day');
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [collapsedIds, setCollapsedIds] = useState([]);
+            const [frozenColumn, setFrozenColumn] = useState('taskName');
+            const [dbError, setDbError] = useState(null);
+            const [colWidths, setColWidths] = useState({
+                taskName: 200, pic: 48, progress: 55, startDate: 80, endDate: 80, status: 75, remark: 90, act: 48
+            });
+            const [picFilter, setPicFilter] = useState('All');
+            const [statusFilter, setStatusFilter] = useState('All');
+
+            const fileInputRef = useRef(null);
+            const dragStartStateRef = useRef(null);
+
+            const autoSizeColumns = (currentItems) => {
+                let maxTaskName = 200;
+                let maxPic = 48;
+                let maxStatus = 75;
+
+                const getLevel = (id, itemsRef, currentLevel = 0) => {
+                    const node = itemsRef.find(i => i.id === id);
+                    if (node && node.parentId) return getLevel(node.parentId, itemsRef, currentLevel + 1);
+                    return currentLevel;
+                };
+
+                currentItems.forEach(item => {
+                    const level = getLevel(item.id, currentItems);
+                    const taskNameWidth = (item.taskName?.length || 0) * 7.5 + (level * 24) + 80;
+                    if (taskNameWidth > maxTaskName) maxTaskName = taskNameWidth;
+
+                    const picWidth = (item.pic?.length || 0) * 7.5 + 24;
+                    if (picWidth > maxPic) maxPic = picWidth;
+
+                    const statusWidth = (item.status?.length || 0) * 7.5 + 32;
+                    if (statusWidth > maxStatus) maxStatus = statusWidth;
+                });
+
+                setColWidths(prev => ({
+                    ...prev,
+                    taskName: Math.max(prev.taskName, maxTaskName),
+                    pic: Math.max(prev.pic, maxPic),
+                    status: Math.max(prev.status, maxStatus),
+                    progress: Math.max(prev.progress || 0, 55),
+                    remark: 95 
+                }));
+            };
+
+            useEffect(() => {
+                const dbRef = db.ref('projects/main/items');
+                
+                const unsubscribe = dbRef.on('value', (snapshot) => {
+                    if (snapshot.exists()) {
+                        let data = snapshot.val();
+                        
+                        if (typeof data === 'object' && !Array.isArray(data)) {
+                            data = Object.values(data);
+                        }
+                        
+                        const validData = Array.isArray(data) ? data.filter(Boolean).map(item => ({
+                            ...item,
+                            parentId: item.parentId || null,
+                            predecessors: item.predecessors || [],
+                            milestoneConfig: item.milestoneConfig || { type: 'star', items: [] }
+                        })) : [];
+                        
+                        setItems(validData);
+                        autoSizeColumns(validData);
+                    } else {
+                        setItems([]);
+                    }
+                    setIsLoaded(true);
+                }, (error) => {
+                    console.error("Firebase load error:", error);
+                    setDbError(error.message);
+                    setIsLoaded(true);
+                });
+
+                const savedWidths = localStorage.getItem('gantt_v1_col_widths');
+                if (savedWidths) {
+                    try { 
+                        const parsedWidths = JSON.parse(savedWidths);
+                        setColWidths(prev => ({
+                            ...prev,
+                            ...parsedWidths,
+                            taskName: Math.max(parsedWidths.taskName, prev.taskName),
+                            pic: Math.max(parsedWidths.pic, prev.pic),
+                            progress: Math.max(parsedWidths.progress || 0, 55),
+                            remark: 95 
+                        }));
+                    } catch(e) { console.error(e); }
+                }
+                
+                const savedFreeze = localStorage.getItem('gantt_v1_frozen_col');
+                if (savedFreeze) setFrozenColumn(savedFreeze);
+
+                return () => dbRef.off('value', unsubscribe);
+            }, []);
+
+            useEffect(() => {
+                if (isLoaded) {
+                    localStorage.setItem('gantt_v1_col_widths', JSON.stringify(colWidths));
+                    localStorage.setItem('gantt_v1_frozen_col', frozenColumn);
+                }
+            }, [colWidths, frozenColumn, isLoaded]);
+
+            const startPreview = () => {
+                if (!dragStartStateRef.current) {
+                    dragStartStateRef.current = items;
+                }
+            };
+
+            const previewDates = (id, newStart, newEnd) => {
+                startPreview();
+                const newItems = items.map(i => i.id === id ? { ...i, startDate: newStart, endDate: newEnd } : i);
+                updateState(newItems, id, false); 
+            };
+
+            const updateState = (newItems, originTaskId = null, saveHistory = true) => {
+                let cascadedItems = newItems;
+                if (originTaskId) {
+                    cascadedItems = cascadeDependencies(newItems, originTaskId);
+                }
+
+                const finalItems = recalculateTree(cascadedItems);
+                
+                if (saveHistory) {
+                    const stateToSave = dragStartStateRef.current || items;
+                    if (JSON.stringify(stateToSave) !== JSON.stringify(finalItems)) {
+                        setHistory(prev => [...prev.slice(-10), stateToSave]);
+                    }
+                    dragStartStateRef.current = null; 
+                }
+                
+                setItems(finalItems);
+                autoSizeColumns(finalItems);
+
+                db.ref('projects/main/items').set(finalItems).catch(error => {
+                    console.error("Firebase save error:", error);
+                    setDbError("ไม่สามารถบันทึกข้อมูลได้ กรุณาเช็ค Rules ใน Firebase: " + error.message);
+                });
+            };
+
+            const handleUndo = () => {
+                if (history.length > 0) {
+                    const previousState = history[history.length - 1];
+                    updateState(previousState, null, false);
+                    setHistory(prev => prev.slice(0, -1));
+                }
+            };
+
+            const toggleCollapse = (id) => {
+                setCollapsedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+            };
+
+            const handleUpdateField = (id, field, value) => {
+                if (id === null && field === 'FILTER_PIC') { setPicFilter(value); return; }
+                if (id === null && field === 'FILTER_STATUS') { setStatusFilter(value); return; }
+
+                const newItems = items.map(item => 
+                    item.id === id ? { ...item, [field]: (field === 'progress' ? Number(value) : value) } : item
+                );
+                const isDateChange = field === 'startDate' || field === 'endDate';
+                updateState(newItems, isDateChange ? id : null, true);
+            };
+
+            const updateDates = (id, newStart, newEnd) => {
+                const newItems = items.map(i => i.id === id ? { ...i, startDate: newStart, endDate: newEnd } : i);
+                updateState(newItems, id, true); 
+            };
+
+            const handleAddDependency = (sourceId, targetId) => {
+                if (sourceId === targetId) return; 
+                const targetTask = items.find(i => i.id === targetId);
+                const currentPreds = targetTask.predecessors || [];
+                
+                if (currentPreds.includes(sourceId)) return; 
+
+                const checkCycle = (currId, targetSearchId, visited = new Set()) => {
+                    if (currId === targetSearchId) return true;
+                    if (visited.has(currId)) return false;
+                    visited.add(currId);
+                    const task = items.find(i => i.id === currId);
+                    if (!task || !task.predecessors) return false;
+                    for (let pId of task.predecessors) {
+                        if (checkCycle(pId, targetSearchId, visited)) return true;
+                    }
+                    return false;
+                };
+
+                if (checkCycle(sourceId, targetId)) {
+                    return; 
+                }
+
+                const newItems = items.map(i => 
+                    i.id === targetId ? { ...i, predecessors: [...currentPreds, sourceId] } : i
+                );
+                updateState(newItems, sourceId, true);
+            };
+
+            const handleRemoveDependencies = (targetId, specificSourceId = null) => {
+                const newItems = items.map(i => {
+                    if (specificSourceId) {
+                        if (i.id === targetId) {
+                            return { ...i, predecessors: (i.predecessors || []).filter(p => p !== specificSourceId) };
+                        }
+                        return i;
+                    } else {
+                        let newPreds = i.predecessors || [];
+                        if (i.id === targetId) {
+                            newPreds = []; 
+                        } else {
+                            newPreds = newPreds.filter(p => p !== targetId); 
+                        }
+                        return { ...i, predecessors: newPreds };
+                    }
+                });
+                updateState(newItems, null, true);
+            };
+
+            const handleAddChild = (parentId, newType) => {
+                const parent = items.find(i => i.id === parentId);
+                let root = parent;
+                let safeCounter = 0;
+                while (root.parentId && safeCounter < 10) {
+                    const next = items.find(i => i.id === root.parentId);
+                    if (!next) break;
+                    root = next;
+                    safeCounter++;
+                }
+                const projectPic = root.pic || '';
+
+                const siblings = items.filter(i => i.parentId === parentId);
+                let defaultStart = parent.startDate || getTodayStr();
+                if (siblings.length > 0) {
+                    let maxEnd = siblings[0].endDate;
+                    siblings.forEach(sib => {
+                        if (sib.endDate && (!maxEnd || sib.endDate > maxEnd)) {
+                            maxEnd = sib.endDate;
+                        }
+                    });
+                    if (maxEnd) {
+                        defaultStart = addDays(maxEnd, 1);
+                    }
+                }
+
+                const newItem = {
+                    id: generateId(), parentId, type: newType, taskName: 'New Task', 
+                    pic: projectPic, startDate: defaultStart, endDate: defaultStart, 
+                    progress: 0, status: 'Not Started', remark: '', sortOrder: items.length + 1, predecessors: [],
+                    milestoneConfig: { type: 'star', items: [] }
+                };
+                updateState([...items, newItem], null, true);
+
+                if (collapsedIds.includes(parentId)) toggleCollapse(parentId);
+            };
+
+            const handleAddNewRoot = (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                const newItem = {
+                    id: generateId(), parentId: null, type: 'Project', taskName: 'New Project', 
+                    pic: '', startDate: getTodayStr(), endDate: addDays(getTodayStr(), 7), 
+                    progress: 0, status: 'Not Started', remark: '', sortOrder: items.length + 1, predecessors: [],
+                    milestoneConfig: { type: 'star', items: [] }
+                };
+                updateState([...items, newItem], null, true);
+            };
+
+            const handleDeleteItem = (id) => {
+                const getIdsToDelete = (parentId) => {
+                    let ids = [parentId];
+                    items.filter(i => i.parentId === parentId).forEach(child => {
+                        ids = ids.concat(getIdsToDelete(child.id));
+                    });
+                    return ids;
+                };
+                const idsToDelete = getIdsToDelete(id);
+                const newItems = items.filter(i => !idsToDelete.includes(i.id)).map(i => ({
+                    ...i,
+                    predecessors: (i.predecessors || []).filter(pId => !idsToDelete.includes(pId))
+                }));
+                updateState(newItems, null, true);
+            };
+
+            const handleImportClick = () => fileInputRef.current.click();
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const lines = evt.target.result.split('\n');
+                    if (lines.length < 2) return;
+                    const parsed = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        if (!lines[i].trim()) continue;
+                        const row = parseCSVLine(lines[i]);
+                        if(row.length >= 11) {
+                            const predsRaw = row[11] ? row[11].replace(/^"|"$/g, '') : "";
+                            const predecessors = predsRaw ? predsRaw.split(';') : [];
+
+                            parsed.push({
+                                id: row[0], parentId: row[1] || null, type: row[2], taskName: row[3].replace(/^"|"$/g, ''),
+                                pic: row[4].replace(/^"|"$/g, ''), status: row[5], progress: Number(row[6]),
+                                startDate: row[7], endDate: row[8], remark: row[9].replace(/^"|"$/g, ''), 
+                                sortOrder: Number(row[10]), predecessors,
+                                milestoneConfig: { type: 'star', items: [] }
+                            });
+                        }
+                    }
+                    updateState(parsed, null, true);
+                    e.target.value = null; 
+                };
+                reader.readAsText(file);
+            };
+
+            if (!isLoaded) return <div className="p-10 text-center flex items-center justify-center h-screen"><span className="animate-pulse text-blue-500 font-bold">Connecting to Live Database...</span></div>;
+
+            return (
+                <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-800 overflow-hidden">
+                    
+                    {dbError ? (
+                        <div className="bg-rose-100 text-rose-800 px-4 py-2 text-xs flex justify-center items-center gap-2 border-b border-rose-200">
+                            <Icons.Warning />
+                            <span><strong>Database Error:</strong> {dbError}</span>
+                        </div>
+                    ) : (
+                        <div className="bg-emerald-100 text-emerald-800 px-4 py-2 text-xs flex justify-center items-center gap-2 border-b border-emerald-200">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                            <span><strong>Live Connected:</strong> ข้อมูลจะซิงค์แบบ Real-time ให้ผู้ใช้งานทุกคนเห็นพร้อมกัน</span>
+                        </div>
+                    )}
+
+                    <header className="bg-white border-b border-slate-200 shadow-sm px-6 py-3 flex items-center justify-between z-40">
+                        <div className="flex items-center gap-6">
+                            <h1 className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600 tracking-tight">
+                                Project Manager
+                            </h1>
+                            <nav className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                                <button onClick={() => setView('dashboard')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'dashboard' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}>
+                                    <Icons.Dashboard /> Dashboard
+                                </button>
+                                <button onClick={() => setView('gantt')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'gantt' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}>
+                                    <Icons.Gantt /> Schedule
+                                </button>
+                            </nav>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {view === 'gantt' && (
+                                <div className="flex bg-slate-100 p-1 rounded-lg mr-4 border border-slate-200">
+                                    {['day', 'week', 'month'].map(s => (
+                                        <button key={s} onClick={() => setScale(s)} className={`px-3 py-1 text-xs font-bold rounded capitalize ${scale === s ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            <div className="h-6 w-px bg-slate-200 mx-2"></div>
+
+                            <button onClick={handleUndo} disabled={history.length === 0} className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Undo last action">
+                                <Icons.Undo />
+                            </button>
+                            
+                            <div className="flex gap-2">
+                                <button onClick={handleImportClick} className="px-3 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded border border-slate-300 flex items-center gap-1 transition-colors">
+                                    <Icons.Upload /> Import CSV
+                                </button>
+                                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
+                                
+                                <button onClick={() => exportToCSV(items)} className="px-3 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded border border-slate-300 flex items-center gap-1 transition-colors">
+                                    <Icons.Download /> CSV
+                                </button>
+
+                                <button onClick={() => exportToExcel(items)} className="px-3 py-1.5 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded border border-emerald-300 flex items-center gap-1 transition-colors">
+                                    <Icons.Excel /> Excel
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 relative overflow-hidden">
+                        {view === 'dashboard' ? (
+                            <Dashboard items={items} />
+                        ) : (
+                            <GanttChart 
+                                items={items} 
+                                scale={scale} 
+                                onUpdateField={handleUpdateField}
+                                onAddChild={handleAddChild}
+                                onDelete={handleDeleteItem} 
+                                updateDates={updateDates}
+                                previewDates={previewDates}
+                                collapsedIds={collapsedIds}
+                                toggleCollapse={toggleCollapse}
+                                colWidths={colWidths}
+                                setColWidths={setColWidths}
+                                handleAddDependency={handleAddDependency}
+                                handleRemoveDependencies={handleRemoveDependencies}
+                                frozenColumn={frozenColumn}
+                                setFrozenColumn={setFrozenColumn}
+                                picFilter={picFilter}
+                                statusFilter={statusFilter}
+                                handleAddNewRoot={handleAddNewRoot}
+                            />
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>            stroke: #94a3b8;
             stroke-width: 1.5;
             fill: none;
             stroke-dasharray: 4;
