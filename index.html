@@ -1017,6 +1017,7 @@
                     
                     bottomLabels.push({ 
                         label: d.getDate(), 
+                        dayName: d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
                         start: i, 
                         width: 1, 
                         isHoliday: isVisualHoliday,
@@ -1314,10 +1315,17 @@
                                         {bottomLabels.map((lbl, i) => (
                                             <div 
                                                 key={`bot-${i}`} 
-                                                className={`group absolute h-full flex items-center justify-center text-[10px] font-medium border-r border-slate-200 px-1 ${lbl.isHoliday && scale === 'day' ? 'text-slate-500 bg-slate-200/50' : 'text-slate-600'} ${lbl.tooltip ? 'cursor-help' : ''}`} 
+                                                className={`group absolute h-full flex flex-col items-center justify-center border-r border-slate-200 hover:z-50 ${lbl.isHoliday && scale === 'day' ? 'bg-slate-200/50 text-slate-500' : 'text-slate-600'} ${lbl.tooltip ? 'cursor-help' : ''}`} 
                                                 style={{ left: `${lbl.start * dayWidth}px`, width: `${lbl.width * dayWidth}px` }}
                                             >
-                                                <span className="truncate pointer-events-none">{lbl.label}</span>
+                                                {lbl.dayName ? (
+                                                    <div className="pointer-events-none flex flex-col items-center justify-center w-full h-full">
+                                                        <span className="text-[6.5px] leading-[8px] font-bold uppercase opacity-60 tracking-tighter">{lbl.dayName}</span>
+                                                        <span className="text-[10px] leading-[12px] font-medium truncate">{lbl.label}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-[10px] font-medium truncate pointer-events-none px-1">{lbl.label}</span>
+                                                )}
                                                 {lbl.tooltip && (
                                                     <div className="absolute top-[calc(100%+4px)] left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] font-normal whitespace-nowrap rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-[100] pointer-events-none">
                                                         {lbl.tooltip}
