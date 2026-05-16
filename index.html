@@ -2060,7 +2060,7 @@
                         }
                     }
 
-                    if (!isMilestoneCell && startD && endD && d >= startD && d <= endD) {
+                    if (item.type !== 'Milestone' && startD && endD && d >= startD && d <= endD) {
                         const currentDayIndex = Math.round(diffDays(formatDate(startD), formatDate(d)));
                         const isDonePortion = currentDayIndex < progressDays;
 
