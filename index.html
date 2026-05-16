@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GanttSync</title>
+    <title>GanttSync - PE-Body Project</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,6 +15,10 @@
     
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- ExcelJS & FileSaver สำหรับ Export .xlsx -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
     <!-- Firebase Compat SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
@@ -75,7 +79,7 @@
         }
         const db = firebase.database();
 
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
 
         const parseDate = (dateStr) => {
             if (!dateStr) return new Date();
@@ -271,7 +275,7 @@
             Delete: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>,
             Warning: () => <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>,
             Undo: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>,
-            Dashboard: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>,
+            Dashboard: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z"></path></svg>,
             Gantt: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>,
             Filter: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>,
             Pin: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"></path></svg>,
@@ -1829,7 +1833,7 @@
             });
         };
 
-        const exportToExcel = (items) => {
+        const exportToExcel = async (items) => {
             const buildExportTree = (parentId, level) => {
                 return items
                     .filter(i => i.parentId === parentId)
@@ -1841,92 +1845,246 @@
             };
             const exportItems = buildExportTree(null, 0);
 
-            let xml = `<?xml version="1.0"?>
-            <?mso-application progid="Excel.Sheet"?>
-            <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-             xmlns:o="urn:schemas-microsoft-com:office:office"
-             xmlns:x="urn:schemas-microsoft-com:office:excel"
-             xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-             <Styles>
-              <Style ss:ID="Default" ss:Name="Normal">
-               <Alignment ss:Vertical="Bottom"/>
-               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>
-              </Style>
-              <Style ss:ID="sHeader">
-               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#FFFFFF" ss:Bold="1"/>
-               <Interior ss:Color="#4F81BD" ss:Pattern="Solid"/>
-              </Style>
-              <Style ss:ID="sProject">
-               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>
-               <Interior ss:Color="#DCE6F1" ss:Pattern="Solid"/>
-              </Style>
-              <Style ss:ID="sPercent">
-               <NumberFormat ss:Format="0%"/>
-              </Style>
-              <Style ss:ID="sProjectPercent">
-               <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>
-               <Interior ss:Color="#DCE6F1" ss:Pattern="Solid"/>
-               <NumberFormat ss:Format="0%"/>
-              </Style>
-             </Styles>
-             <Worksheet ss:Name="Project Schedule">
-              <Table>
-               <Column ss:Width="80"/>
-               <Column ss:Width="200"/>
-               <Column ss:Width="80"/>
-               <Column ss:Width="80"/>
-               <Column ss:Width="80"/>
-               <Column ss:Width="60"/>
-               <Column ss:Width="80"/>
-               <Column ss:Width="200"/>
-               <Row>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Type</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Task Name</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">PIC</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Status</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Progress</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Start Date</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">End Date</Data></Cell>
-                <Cell ss:StyleID="sHeader"><Data ss:Type="String">Remark</Data></Cell>
-               </Row>`;
-
-            exportItems.forEach(item => {
-                const isProj = item.type === 'Project' || item.type === 'Job';
-                const styleId = isProj ? 'sProject' : 'Default';
-                const stylePercentId = isProj ? 'sProjectPercent' : 'sPercent';
-                const indent = "&#160;&#160;&#160;&#160;".repeat(item.level);
-
-                xml += `
-                 <Row>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.type)}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${indent}${escapeXml(item.taskName)}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.pic)}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.status)}</Data></Cell>
-                  <Cell ss:StyleID="${stylePercentId}"><Data ss:Type="Number">${Math.round(item.progress || 0) / 100}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.startDate)}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.endDate)}</Data></Cell>
-                  <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(item.remark)}</Data></Cell>
-                 </Row>`;
+            const allDates = exportItems.flatMap(i => {
+                const dates = [];
+                if (i.startDate) dates.push(parseDate(i.startDate));
+                if (i.endDate) dates.push(parseDate(i.endDate));
+                return dates;
             });
 
-            xml += `
-              </Table>
-             </Worksheet>
-            </Workbook>`;
+            let minDate = new Date();
+            let maxDate = new Date();
+            if (allDates.length > 0) {
+                minDate = new Date(Math.min(...allDates));
+                maxDate = new Date(Math.max(...allDates));
+            }
+            minDate.setDate(minDate.getDate() - 3); 
+            maxDate.setDate(maxDate.getDate() + 7); 
 
-            const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `ProjectPlan_${getTodayStr()}.xls`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const totalDays = diffDays(formatDate(minDate), formatDate(maxDate));
+            const datesArray = [];
+            let currentDate = new Date(minDate);
+            for (let i = 0; i <= totalDays; i++) {
+                datesArray.push(new Date(currentDate));
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            const todayMs = parseDate(getTodayStr()).getTime();
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Project Schedule');
+            
+            // ตั้งค่า Gridlines และ Freeze Panes
+            worksheet.views = [
+                { 
+                    showGridLines: true,
+                    state: 'frozen',
+                    xSplit: 8, // ล็อก 8 คอลัมน์แรก (Type ถึง Remark)
+                    ySplit: 2, // ล็อก 2 แถวแรก (แถวเวลา Export และ แถวหัวตาราง Header)
+                    activeCell: 'I3' 
+                }
+            ];
+
+            const baseCols = [
+                { header: 'Type', key: 'type', width: 15 },
+                { header: 'Task Name', key: 'name', width: 35 },
+                { header: 'PIC', key: 'pic', width: 12 },
+                { header: 'Status', key: 'status', width: 15 },
+                { header: 'Progress', key: 'progress', width: 10 },
+                { header: 'Start Date', key: 'start', width: 15 },
+                { header: 'End Date', key: 'end', width: 15 },
+                { header: 'Remark', key: 'remark', width: 25 }
+            ];
+
+            const dateCols = datesArray.map(d => ({
+                header: `${d.getDate()}\n${d.toLocaleDateString('en-US', {month:'short'})}`,
+                key: `date_${d.getTime()}`,
+                width: 4
+            }));
+
+            worksheet.columns = [...baseCols, ...dateCols];
+
+            // 1. เพิ่มแถวบอก วัน/เวลา ที่ Export
+            worksheet.insertRow(1, []);
+            const exportRow = worksheet.getRow(1);
+            exportRow.height = 25;
+            const now = new Date();
+            const exportText = `Exported at: ${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'short' })} ${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+            exportRow.getCell(1).value = exportText;
+            exportRow.getCell(1).font = { name: 'Segoe UI', size: 10, color: { argb: 'FF475569' }, italic: true, bold: true };
+            exportRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
+            worksheet.mergeCells(1, 1, 1, 8);
+
+            // 2. Header Style (แถวที่ 2)
+            worksheet.getRow(2).height = 30;
+            worksheet.getRow(2).eachCell((cell, colNumber) => {
+                cell.font = { name: 'Segoe UI', size: 9, color: { argb: 'FFFFFFFF' }, bold: true };
+                cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+                if (colNumber <= 8) {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF475569' } };
+                } else {
+                    const d = datesArray[colNumber - 9];
+                    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                    const isToday = d.getTime() === todayMs;
+                    cell.font = { name: 'Segoe UI', size: 8, color: { argb: isToday ? 'FFFFFFFF' : (isWeekend ? 'FF94A3B8' : 'FF475569') }, bold: isToday };
+                    if (isToday) {
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } };
+                    }
+                }
+            });
+
+            const formatExcelDate = (dateStr) => {
+                if (!dateStr) return '';
+                const d = parseDate(dateStr);
+                return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getFullYear()}`;
+            };
+
+            exportItems.forEach((item, rowIndex) => {
+                const rowNumber = rowIndex + 3; 
+                const row = worksheet.getRow(rowNumber);
+                row.height = 20;
+
+                const isProj = item.type === 'Project' || item.type === 'Job';
+                const fontStyle = { name: 'Segoe UI', size: 10, color: { argb: 'FF1E293B' }, bold: isProj };
+                const indentSpaces = '    '.repeat(item.level);
+
+                row.getCell(1).value = indentSpaces + item.type;
+                row.getCell(2).value = indentSpaces + item.taskName;
+                row.getCell(3).value = item.pic;
+                row.getCell(4).value = item.status;
+                row.getCell(5).value = (item.progress || 0) / 100;
+                row.getCell(5).numFmt = '0%';
+                row.getCell(6).value = formatExcelDate(item.startDate);
+                row.getCell(7).value = formatExcelDate(item.endDate);
+                row.getCell(8).value = item.remark;
+                
+                for(let i=1; i<=8; i++) {
+                    const cell = row.getCell(i);
+                    cell.font = (i === 8) ? { ...fontStyle, bold: false } : fontStyle;
+                    cell.alignment = { vertical: 'middle' };
+                }
+
+                // Status Cell Style
+                const statusCell = row.getCell(4);
+                statusCell.alignment = { vertical: 'middle', horizontal: 'center' };
+                const statusStyles = {
+                    'Complete': { font: 'FF065F46', bg: 'FFD1FAE5' },
+                    'Delay': { font: 'FF9F1239', bg: 'FFFFE4E6' },
+                    'In Progress': { font: 'FF1E40AF', bg: 'FFDBEAFE' },
+                    'Not Started': { font: 'FF1E293B', bg: 'FFF1F5F9' }
+                };
+                const st = statusStyles[item.status] || statusStyles['Not Started'];
+                statusCell.font = { name: 'Segoe UI', size: 9, color: { argb: st.font }, bold: true };
+                statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st.bg } };
+
+                const startD = item.startDate ? parseDate(item.startDate) : null;
+                const endD = item.endDate ? parseDate(item.endDate) : null;
+                if (startD) startD.setHours(0,0,0,0);
+                if (endD) endD.setHours(0,0,0,0);
+
+                const getBaseStatusColor = (status) => {
+                    if (status === 'Complete') return 'FFD1FAE5';
+                    if (status === 'Delay') return 'FFFFE4E6';
+                    if (status === 'In Progress') return 'FFDBEAFE';
+                    return 'FFF1F5F9';
+                };
+                const baseStatusColor = getBaseStatusColor(item.status);
+
+                let progressDays = 0;
+                if (startD && endD) {
+                    const totalTaskDays = diffDays(formatDate(startD), formatDate(endD)) + 1;
+                    progressDays = Math.round(totalTaskDays * (item.progress || 0) / 100);
+                }
+
+                for (let i = 0; i < datesArray.length; i++) {
+                    const d = datesArray[i];
+                    d.setHours(0,0,0,0);
+                    const colNumber = i + 9;
+                    const cell = row.getCell(colNumber);
+
+                    let cellColor = null; 
+                    let cellText = null;
+                    let fontColor = 'FF333333';
+
+                    let isMilestoneCell = false;
+                    if (item.type === 'Milestone') {
+                        const config = item.milestoneConfig || { items: [] };
+                        const mItem = config.items.find(mi => {
+                            if (config.type === 'star' && mi.date) return parseDate(mi.date).getTime() === d.getTime();
+                            else if (config.type === 'arrow' && mi.startDate) return parseDate(mi.startDate).getTime() === d.getTime();
+                            return false;
+                        });
+
+                        if (mItem) {
+                            cellColor = 'FFF97316'; cellText = mItem.label || ''; fontColor = 'FFFFFFFF'; isMilestoneCell = true;
+                        } else {
+                            const inArrowRange = config.type === 'arrow' && config.items.some(mi => mi.startDate && mi.endDate && d > parseDate(mi.startDate) && d <= parseDate(mi.endDate));
+                            if (inArrowRange) { cellColor = 'FFF97316'; isMilestoneCell = true; }
+                        }
+                    }
+
+                    if (!isMilestoneCell && startD && endD && d >= startD && d <= endD) {
+                        const currentDayIndex = Math.round(diffDays(formatDate(startD), formatDate(d)));
+                        const isDonePortion = currentDayIndex < progressDays;
+
+                        if (isDonePortion) {
+                            cellColor = 'FF34D399'; 
+                            fontColor = 'FF064E3B';
+                        } else {
+                            cellColor = baseStatusColor;
+                            const colors = { 'Complete': 'FF065F46', 'Delay': 'FF9F1239', 'In Progress': 'FF1E40AF' };
+                            fontColor = colors[item.status] || 'FF1E293B';
+                        }
+
+                        if (d.getTime() === startD.getTime() || (i === 0 && d > startD)) {
+                            cellText = `${item.taskName} ${Math.round(item.progress || 0)}%`;
+                        }
+                    }
+
+                    if (cellColor) {
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cellColor } };
+                    }
+                    
+                    if (cellText) {
+                        cell.value = cellText;
+                        cell.font = { name: 'Segoe UI', size: 8, color: { argb: fontColor }, bold: true };
+                        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
+                    }
+                }
+            });
+
+            // เส้น TODAY แดงแบบ Object
+            const todayIndex = datesArray.findIndex(d => d.getTime() === todayMs);
+            if (todayIndex !== -1) {
+                const todayCol = todayIndex + 9;
+                const canvas = document.createElement('canvas');
+                canvas.width = 10; canvas.height = 10;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(0, 0, 10, 10);
+                
+                const imageId = workbook.addImage({
+                    base64: canvas.toDataURL('image/png'),
+                    extension: 'png',
+                });
+
+                worksheet.addImage(imageId, {
+                    tl: { col: todayCol - 1, row: 1 }, 
+                    br: { col: todayCol - 1 + 0.1, row: exportItems.length + 2 }, 
+                    editAs: 'twoCell' 
+                });
+            }
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            saveAs(blob, `PEB_Project_Plan_${getTodayStr()}.xlsx`);
         };
 
         const App = () => {
             const [items, setItems] = useState([]);
             const [history, setHistory] = useState([]);
-            const [view, setView] = useState('gantt');
+            const [view, setView] = useState('dashboard');
             const [scale, setScale] = useState('day');
             const [isLoaded, setIsLoaded] = useState(false);
             const [collapsedIds, setCollapsedIds] = useState([]);
@@ -1937,29 +2095,14 @@
             });
             const [picFilter, setPicFilter] = useState('All');
             const [statusFilter, setStatusFilter] = useState('All');
-
             const [selectedProjects, setSelectedProjects] = useState(['All']);
             const [isProjectFilterOpen, setIsProjectFilterOpen] = useState(false);
+            const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
             const fileInputRef = useRef(null);
             const dragStartStateRef = useRef(null);
 
-            const handleProjectToggle = (projectId) => {
-                if (projectId === 'All') {
-                    setSelectedProjects(['All']);
-                } else {
-                    let newSelected = selectedProjects.filter(id => id !== 'All');
-                    if (newSelected.includes(projectId)) {
-                        newSelected = newSelected.filter(id => id !== projectId);
-                        if (newSelected.length === 0) newSelected = ['All'];
-                    } else {
-                        newSelected.push(projectId);
-                    }
-                    setSelectedProjects(newSelected);
-                }
-            };
-
-            const displayedItems = React.useMemo(() => {
+            const displayedItems = useMemo(() => {
                 if (selectedProjects.includes('All')) return items;
                 const keep = new Set(selectedProjects);
                 const addDescendants = (parentId) => {
@@ -1971,6 +2114,34 @@
                 selectedProjects.forEach(addDescendants);
                 return items.filter(i => keep.has(i.id));
             }, [items, selectedProjects]);
+
+            const getOnlyShowedItems = () => {
+                const baseItems = displayedItems;
+                if (picFilter === 'All' && statusFilter === 'All') return baseItems;
+
+                const matches = baseItems.filter(i => {
+                    if (i.type !== 'Job') return false;
+                    let passPic = picFilter === 'All' || i.pic === picFilter;
+                    let passStatus = statusFilter === 'All' || i.status === statusFilter;
+                    return passPic && passStatus;
+                });
+
+                const visibleIds = new Set();
+                const addAncestors = (id) => {
+                    if (!id || visibleIds.has(id)) return;
+                    visibleIds.add(id);
+                    const item = baseItems.find(i => i.id === id);
+                    if (item && item.parentId) addAncestors(item.parentId);
+                };
+                const addDescendants = (id) => {
+                    if (!id) return;
+                    visibleIds.add(id);
+                    baseItems.filter(i => i.parentId === id).forEach(child => addDescendants(child.id));
+                };
+
+                matches.forEach(m => { addAncestors(m.id); addDescendants(m.id); });
+                return baseItems.filter(i => visibleIds.has(i.id));
+            };
 
             const autoSizeColumns = (currentItems) => {
                 let maxTaskName = 200;
@@ -1987,10 +2158,8 @@
                     const level = getLevel(item.id, currentItems);
                     const taskNameWidth = (item.taskName?.length || 0) * 7.5 + (level * 24) + 80;
                     if (taskNameWidth > maxTaskName) maxTaskName = taskNameWidth;
-
                     const picWidth = (item.pic?.length || 0) * 7.5 + 24;
                     if (picWidth > maxPic) maxPic = picWidth;
-
                     const statusWidth = (item.status?.length || 0) * 7.5 + 32;
                     if (statusWidth > maxStatus) maxStatus = statusWidth;
                 });
@@ -1999,22 +2168,16 @@
                     ...prev,
                     taskName: Math.max(prev.taskName, maxTaskName),
                     pic: Math.max(prev.pic, maxPic),
-                    status: Math.max(prev.status, maxStatus),
-                    progress: Math.max(prev.progress || 0, 55),
-                    remark: 95 
+                    status: Math.max(prev.status, maxStatus)
                 }));
             };
 
             useEffect(() => {
                 const dbRef = db.ref('projects/main/items');
-                
                 const unsubscribe = dbRef.on('value', (snapshot) => {
                     if (snapshot.exists()) {
                         let data = snapshot.val();
-                        if (typeof data === 'object' && !Array.isArray(data)) {
-                            data = Object.values(data);
-                        }
-                        
+                        if (typeof data === 'object' && !Array.isArray(data)) data = Object.values(data);
                         const validData = Array.isArray(data) ? data.filter(Boolean).map(item => ({
                             ...item,
                             parentId: item.parentId || null,
@@ -2024,7 +2187,6 @@
                                 items: item.milestoneConfig?.items || []
                             }
                         })) : [];
-                        
                         setItems(validData);
                         autoSizeColumns(validData);
                     } else {
@@ -2032,224 +2194,43 @@
                     }
                     setIsLoaded(true);
                 }, (error) => {
-                    console.error("Firebase load error:", error);
                     setDbError(error.message);
                     setIsLoaded(true);
                 });
-
-                const savedWidths = localStorage.getItem('gantt_v1_col_widths');
-                if (savedWidths) {
-                    try { 
-                        const parsedWidths = JSON.parse(savedWidths);
-                        setColWidths(prev => ({
-                            ...prev,
-                            ...parsedWidths,
-                            taskName: Math.max(parsedWidths.taskName, prev.taskName),
-                            pic: Math.max(parsedWidths.pic, prev.pic),
-                            progress: Math.max(parsedWidths.progress || 0, 55),
-                            remark: 95 
-                        }));
-                    } catch(e) { console.error(e); }
-                }
-                
-                const savedFreeze = localStorage.getItem('gantt_v1_frozen_col');
-                if (savedFreeze) setFrozenColumn(savedFreeze);
-
                 return () => dbRef.off('value', unsubscribe);
             }, []);
 
-            useEffect(() => {
-                if (isLoaded) {
-                    localStorage.setItem('gantt_v1_col_widths', JSON.stringify(colWidths));
-                    localStorage.setItem('gantt_v1_frozen_col', frozenColumn);
-                }
-            }, [colWidths, frozenColumn, isLoaded]);
-
-            const startPreview = () => {
-                if (!dragStartStateRef.current) {
-                    dragStartStateRef.current = items;
-                }
-            };
-
-            const previewDates = (id, newStart, newEnd) => {
-                startPreview();
-                const newItems = items.map(i => i.id === id ? { ...i, startDate: newStart, endDate: newEnd } : i);
-                updateState(newItems, id, false); 
-            };
-
             const updateState = (newItems, originTaskId = null, saveHistory = true) => {
                 let cascadedItems = newItems;
-                if (originTaskId) {
-                    cascadedItems = cascadeDependencies(newItems, originTaskId);
-                }
-
+                if (originTaskId) cascadedItems = cascadeDependencies(newItems, originTaskId);
                 const finalItems = recalculateTree(cascadedItems);
-                
                 if (saveHistory) {
                     const stateToSave = dragStartStateRef.current || items;
-                    if (JSON.stringify(stateToSave) !== JSON.stringify(finalItems)) {
-                        setHistory(prev => [...prev.slice(-10), stateToSave]);
-                    }
+                    setHistory(prev => [...prev.slice(-10), stateToSave]);
                     dragStartStateRef.current = null; 
                 }
-                
                 setItems(finalItems);
-                autoSizeColumns(finalItems);
-
-                db.ref('projects/main/items').set(finalItems).catch(error => {
-                    console.error("Firebase save error:", error);
-                    setDbError("ไม่สามารถบันทึกข้อมูลได้: " + error.message);
-                });
-            };
-
-            const handleUndo = () => {
-                if (history.length > 0) {
-                    const previousState = history[history.length - 1];
-                    updateState(previousState, null, false);
-                    setHistory(prev => prev.slice(0, -1));
-                }
-            };
-
-            const toggleCollapse = (id) => {
-                setCollapsedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+                db.ref('projects/main/items').set(finalItems);
             };
 
             const handleUpdateField = (id, field, value) => {
                 if (id === null && field === 'FILTER_PIC') { setPicFilter(value); return; }
                 if (id === null && field === 'FILTER_STATUS') { setStatusFilter(value); return; }
-
-                const newItems = items.map(item => 
-                    item.id === id ? { ...item, [field]: (field === 'progress' ? Number(value) : value) } : item
-                );
-                const isDateChange = field === 'startDate' || field === 'endDate';
-                updateState(newItems, isDateChange ? id : null, true);
-            };
-
-            const updateDates = (id, newStart, newEnd) => {
-                const newItems = items.map(i => i.id === id ? { ...i, startDate: newStart, endDate: newEnd } : i);
-                updateState(newItems, id, true); 
-            };
-
-            const handleAddDependency = (sourceId, targetId) => {
-                if (sourceId === targetId) return; 
-                const targetTask = items.find(i => i.id === targetId);
-                const currentPreds = targetTask.predecessors || [];
-                
-                if (currentPreds.includes(sourceId)) return; 
-
-                const checkCycle = (currId, targetSearchId, visited = new Set()) => {
-                    if (currId === targetSearchId) return true;
-                    if (visited.has(currId)) return false;
-                    visited.add(currId);
-                    const task = items.find(i => i.id === currId);
-                    if (!task || !task.predecessors) return false;
-                    for (let pId of task.predecessors) {
-                        if (checkCycle(pId, targetSearchId, visited)) return true;
-                    }
-                    return false;
-                };
-
-                if (checkCycle(sourceId, targetId)) {
-                    return; 
-                }
-
-                const newItems = items.map(i => 
-                    i.id === targetId ? { ...i, predecessors: [...currentPreds, sourceId] } : i
-                );
-                updateState(newItems, sourceId, true);
-            };
-
-            const handleRemoveDependencies = (targetId, specificSourceId = null) => {
-                const newItems = items.map(i => {
-                    if (specificSourceId) {
-                        if (i.id === targetId) {
-                            return { ...i, predecessors: (i.predecessors || []).filter(p => p !== specificSourceId) };
-                        }
-                        return i;
-                    } else {
-                        let newPreds = i.predecessors || [];
-                        if (i.id === targetId) {
-                            newPreds = []; 
-                        } else {
-                            newPreds = newPreds.filter(p => p !== targetId); 
-                        }
-                        return { ...i, predecessors: newPreds };
-                    }
-                });
-                updateState(newItems, null, true);
+                const newItems = items.map(item => item.id === id ? { ...item, [field]: (field === 'progress' ? Number(value) : value) } : item);
+                updateState(newItems, (field === 'startDate' || field === 'endDate') ? id : null, true);
             };
 
             const handleAddChild = (targetId, newType, relation = 'child') => {
                 const target = items.find(i => i.id === targetId);
-                let parentId = target.parentId;
-                let projectPic = target.pic || '';
-
-                if (relation === 'child') {
-                    parentId = target.id;
-                }
-
-                let root = items.find(i => i.id === parentId) || target;
-                let safeCounter = 0;
-                while (root && root.parentId && safeCounter < 10) {
-                    root = items.find(i => i.id === root.parentId) || root;
-                    safeCounter++;
-                }
-                projectPic = root.pic || '';
-
+                let parentId = relation === 'child' ? target.id : target.parentId;
                 const sortedItems = [...items].sort((a,b) => a.sortOrder - b.sortOrder);
-                const targetIndex = sortedItems.findIndex(i => i.id === targetId);
-                
-                const getDescendants = (pId) => {
-                    let desc = sortedItems.filter(i => i.parentId === pId);
-                    let all = [...desc];
-                    desc.forEach(d => { all = all.concat(getDescendants(d.id)); });
-                    return all;
-                };
-                
-                let insertAfterIndex = targetIndex;
-                if (relation === 'child' || relation === 'sibling') {
-                     const descs = getDescendants(target.id);
-                     if (descs.length > 0) {
-                         const lastDescId = descs[descs.length - 1].id;
-                         insertAfterIndex = sortedItems.findIndex(i => i.id === lastDescId);
-                     }
-                }
-
-                const shiftedItems = sortedItems.map((item, idx) => ({
-                    ...item,
-                    sortOrder: idx * 10
-                }));
-
-                const gapIndex = insertAfterIndex;
-                const finalNewOrder = shiftedItems[gapIndex].sortOrder + 5;
-
                 const newItem = {
-                    id: generateId(), 
-                    parentId, 
-                    type: newType, 
-                    taskName: `New ${newType}`, 
-                    pic: projectPic, 
-                    startDate: target.startDate || getTodayStr(), 
-                    endDate: target.endDate || addDays(getTodayStr(), 1), 
-                    progress: 0, 
-                    status: 'Not Started', 
-                    remark: '', 
-                    sortOrder: finalNewOrder, 
-                    predecessors: [],
+                    id: generateId(), parentId, type: newType, taskName: `New ${newType}`, 
+                    pic: target.pic || '', startDate: target.startDate || getTodayStr(), endDate: target.endDate || addDays(getTodayStr(), 2), 
+                    progress: 0, status: 'Not Started', remark: '', sortOrder: sortedItems.length + 1, predecessors: [],
                     milestoneConfig: { type: 'star', items: [] }
                 };
-
-                const allItemsNew = [...shiftedItems, newItem];
-                allItemsNew.sort((a,b) => a.sortOrder - b.sortOrder);
-                allItemsNew.forEach((item, idx) => item.sortOrder = idx + 1);
-
-                updateState(allItemsNew, null, true);
-
-                if (relation === 'child' && collapsedIds.includes(parentId)) {
-                    toggleCollapse(parentId);
-                } else if (relation === 'child' && collapsedIds.includes(targetId)) {
-                    toggleCollapse(targetId);
-                }
+                updateState([...items, newItem], null, true);
             };
 
             const handleAddNewRoot = (e) => {
@@ -2269,20 +2250,25 @@
                 updateState([...items, newItem], null, true);
             };
 
-            const handleDeleteItem = (id) => {
-                const getIdsToDelete = (parentId) => {
-                    let ids = [parentId];
-                    items.filter(i => i.parentId === parentId).forEach(child => {
-                        ids = ids.concat(getIdsToDelete(child.id));
-                    });
-                    return ids;
-                };
-                const idsToDelete = getIdsToDelete(id);
-                const newItems = items.filter(i => !idsToDelete.includes(i.id)).map(i => ({
-                    ...i,
-                    predecessors: (i.predecessors || []).filter(pId => !idsToDelete.includes(pId))
-                }));
-                updateState(newItems, null, true);
+            const handleUndo = () => {
+                if (history.length > 0) {
+                    const previousState = history[history.length - 1];
+                    setItems(previousState);
+                    setHistory(prev => prev.slice(0, -1));
+                    db.ref('projects/main/items').set(previousState);
+                }
+            };
+
+            const handleProjectToggle = (projectId) => {
+                if (projectId === 'All') { setSelectedProjects(['All']); }
+                else {
+                    let newSelected = selectedProjects.filter(id => id !== 'All');
+                    if (newSelected.includes(projectId)) {
+                        newSelected = newSelected.filter(id => id !== projectId);
+                        if (newSelected.length === 0) newSelected = ['All'];
+                    } else { newSelected.push(projectId); }
+                    setSelectedProjects(newSelected);
+                }
             };
 
             const handleImportClick = () => fileInputRef.current.click();
@@ -2291,7 +2277,7 @@
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (evt) => {
-                    const lines = evt.target.result.split('\n');
+                    const lines = evt.result.split('\n');
                     if (lines.length < 2) return;
                     const parsed = [];
                     for (let i = 1; i < lines.length; i++) {
@@ -2300,7 +2286,6 @@
                         if(row.length >= 11) {
                             const predsRaw = row[11] ? row[11].replace(/^"|"$/g, '') : "";
                             const predecessors = predsRaw ? predsRaw.split(';') : [];
-
                             parsed.push({
                                 id: row[0], parentId: row[1] || null, type: row[2], taskName: row[3].replace(/^"|"$/g, ''),
                                 pic: row[4].replace(/^"|"$/g, ''), status: row[5], progress: Number(row[6]),
@@ -2316,15 +2301,13 @@
                 reader.readAsText(file);
             };
 
-            if (!isLoaded) return <div className="p-10 text-center flex items-center justify-center h-screen"><span className="animate-pulse text-blue-500 font-bold">Connecting to Live Database...</span></div>;
+            if (!isLoaded) return <div className="p-10 text-center h-screen flex items-center justify-center"><span className="animate-pulse text-blue-600 font-bold">Connecting...</span></div>;
 
             return (
                 <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-800 overflow-hidden">
-                    
                     {dbError ? (
                         <div className="bg-rose-100 text-rose-800 px-4 py-0.5 text-xs flex justify-center items-center gap-2 border-b border-rose-200">
-                            <Icons.Warning />
-                            <span><strong>Database Error:</strong> {dbError}</span>
+                            <Icons.Warning /><span><strong>Error:</strong> {dbError}</span>
                         </div>
                     ) : (
                         <div className="bg-emerald-100 text-emerald-800 px-4 py-0.5 text-xs flex justify-center items-center gap-2 border-b border-emerald-200">
@@ -2336,77 +2319,41 @@
                     <header className="bg-white border-b border-slate-200 shadow-sm px-6 py-3 flex items-center justify-between z-[70] relative">
                         <div className="flex items-center gap-6">
                             <div className="flex items-center gap-2">
-                                <img 
-                                    src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Mitsubishi_logo.svg/1920px-Mitsubishi_logo.svg.png" 
-                                    alt="Mitsubishi Logo" 
-                                    className="h-6 w-auto object-contain"
-                                />
-                                <h1 className="text-lg font-black whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600 tracking-tight">
-                                    PE-Body Project
-                                </h1>
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Mitsubishi_logo.svg/1920px-Mitsubishi_logo.svg.png" className="h-6 w-auto object-contain" alt="Logo" />
+                                <h1 className="text-lg font-black whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600 tracking-tight">PE-Body Project</h1>
                             </div>
                             <nav className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-                                <button onClick={() => setView('dashboard')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'dashboard' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}>
-                                    <Icons.Dashboard /> Dashboard
-                                </button>
-                                <button onClick={() => setView('gantt')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'gantt' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}>
-                                    <Icons.Gantt /> Schedule
-                                </button>
+                                <button onClick={() => setView('dashboard')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'dashboard' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}><Icons.Dashboard /> Dashboard</button>
+                                <button onClick={() => setView('gantt')} className={`px-4 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${view === 'gantt' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}><Icons.Gantt /> Schedule</button>
                             </nav>
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <div className="relative flex items-center">
-                                <button 
-                                    onClick={() => setIsProjectFilterOpen(!isProjectFilterOpen)} 
-                                    className={`px-3 py-1.5 text-xs font-semibold rounded border flex items-center gap-1 transition-colors ${!selectedProjects.includes('All') ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}
-                                >
-                                    <Icons.Filter /> Projects
-                                    {!selectedProjects.includes('All') && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{selectedProjects.length}</span>}
+                            <div className="relative">
+                                <button onClick={() => setIsProjectFilterOpen(!isProjectFilterOpen)} className={`px-3 py-1.5 text-xs font-semibold rounded border flex items-center gap-1 ${!selectedProjects.includes('All') ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}>
+                                    <Icons.Filter /> Projects {!selectedProjects.includes('All') && <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">{selectedProjects.length}</span>}
                                 </button>
-                                
                                 {isProjectFilterOpen && (
                                     <>
                                         <div className="fixed inset-0 z-[9998]" onClick={() => setIsProjectFilterOpen(false)}></div>
-                                        <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 shadow-xl rounded-xl py-2 z-[9999] shadow-lg">
-                                            <div className="px-3 py-1 relative z-10">
-                                                <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 px-2 py-1.5 rounded-lg">
-                                                    <input type="checkbox" checked={selectedProjects.includes('All')} onChange={() => handleProjectToggle('All')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer" />
-                                                    <span className="text-sm font-bold text-slate-700">All Projects</span>
-                                                </label>
-                                            </div>
-                                            <div className="h-px bg-slate-100 my-1 relative z-10"></div>
-                                            <div className="max-h-[60vh] overflow-y-auto px-3 py-1 flex flex-col gap-1 relative z-10">
+                                        <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 shadow-xl rounded-xl py-2 z-[9999]">
+                                            <div className="px-3 py-1"><label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 px-2 py-1.5 rounded-lg font-bold"><input type="checkbox" checked={selectedProjects.includes('All')} onChange={() => handleProjectToggle('All')} /> All Projects</label></div>
+                                            <div className="h-px bg-slate-100 my-1"></div>
+                                            <div className="max-h-[60vh] overflow-y-auto px-3 py-1 flex flex-col gap-1">
                                                 {items.filter(i => i.type === 'Project').map(p => (
-                                                    <label key={p.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 px-2 py-1.5 rounded-lg transition-colors">
-                                                        <input type="checkbox" checked={selectedProjects.includes(p.id)} onChange={() => handleProjectToggle(p.id)} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer" />
-                                                        <span className="text-sm text-slate-600 truncate">{p.taskName}</span>
-                                                    </label>
+                                                    <label key={p.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 px-2 py-1.5 rounded-lg transition-colors text-sm"><input type="checkbox" checked={selectedProjects.includes(p.id)} onChange={() => handleProjectToggle(p.id)} /> {p.taskName}</label>
                                                 ))}
-                                                {items.filter(i => i.type === 'Project').length === 0 && <div className="text-xs text-slate-400 px-2 py-1 text-center">No projects found</div>}
                                             </div>
                                         </div>
                                     </>
                                 )}
                             </div>
 
-                            {view === 'gantt' && (
-                                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                                    {['day', 'week', 'month'].map(s => (
-                                        <button key={s} onClick={() => setScale(s)} className={`px-3 py-1 text-xs font-bold rounded capitalize ${scale === s ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-                                            {s}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                            
-                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
-
                             <button onClick={handleUndo} disabled={history.length === 0} className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Undo last action">
                                 <Icons.Undo />
                             </button>
-                            
-                            <div className="flex gap-2 ml-1">
+
+                            <div className="flex gap-2">
                                 <button onClick={handleImportClick} className="px-3 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded border border-slate-300 flex items-center gap-1 transition-colors">
                                     <Icons.Upload /> Import CSV
                                 </button>
@@ -2416,9 +2363,21 @@
                                     <Icons.Download /> CSV
                                 </button>
 
-                                <button onClick={() => exportToExcel(displayedItems)} className="px-3 py-1.5 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded border border-emerald-300 flex items-center gap-1 transition-colors">
-                                    <Icons.Excel /> Excel
-                                </button>
+                                <div className="relative">
+                                    <button onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} className="px-3 py-1.5 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded border border-emerald-300 flex items-center gap-1 transition-colors">
+                                        <Icons.Excel /> Excel <svg className={`w-3 h-3 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>
+                                    </button>
+                                    {isExportMenuOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-[9998]" onClick={() => setIsExportMenuOpen(false)}></div>
+                                            <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 shadow-xl rounded-xl py-1 z-[9999] overflow-hidden">
+                                                <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">Export Options</div>
+                                                <button className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2" onClick={() => { exportToExcel(items); setIsExportMenuOpen(false); }}><div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> All Projects</button>
+                                                <button className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2" onClick={() => { exportToExcel(getOnlyShowedItems()); setIsExportMenuOpen(false); }}><div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Only Showed</button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </header>
@@ -2428,23 +2387,53 @@
                             <Dashboard items={displayedItems} />
                         ) : (
                             <GanttChart 
-                                items={displayedItems} 
-                                scale={scale} 
-                                onUpdateField={handleUpdateField}
-                                onAddChild={handleAddChild}
-                                onDelete={handleDeleteItem} 
-                                updateDates={updateDates}
-                                previewDates={previewDates}
-                                collapsedIds={collapsedIds}
-                                toggleCollapse={toggleCollapse}
-                                colWidths={colWidths}
-                                setColWidths={setColWidths}
-                                handleAddDependency={handleAddDependency}
-                                handleRemoveDependencies={handleRemoveDependencies}
-                                frozenColumn={frozenColumn}
-                                setFrozenColumn={setFrozenColumn}
-                                picFilter={picFilter}
-                                statusFilter={statusFilter}
+                                items={displayedItems} scale={scale} onUpdateField={handleUpdateField} onAddChild={handleAddChild}
+                                onDelete={(id) => {
+                                    const getIdsToDelete = (parentId) => {
+                                        let ids = [parentId];
+                                        items.filter(i => i.parentId === parentId).forEach(child => {
+                                            ids = ids.concat(getIdsToDelete(child.id));
+                                        });
+                                        return ids;
+                                    };
+                                    const idsToDelete = getIdsToDelete(id);
+                                    const newItems = items.filter(i => !idsToDelete.includes(i.id)).map(i => ({
+                                        ...i, predecessors: (i.predecessors || []).filter(pId => !idsToDelete.includes(pId))
+                                    }));
+                                    updateState(newItems, null, true);
+                                }}
+                                updateDates={(id, s, e) => {
+                                    const newItems = items.map(i => i.id === id ? { ...i, startDate: s, endDate: e } : i);
+                                    updateState(newItems, id, true);
+                                }}
+                                previewDates={(id, s, e) => {
+                                    const newItems = items.map(i => i.id === id ? { ...i, startDate: s, endDate: e } : i);
+                                    updateState(newItems, id, false);
+                                }} 
+                                collapsedIds={collapsedIds} toggleCollapse={(id) => setCollapsedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])}
+                                colWidths={colWidths} setColWidths={setColWidths} 
+                                handleAddDependency={(s, t) => {
+                                    const targetTask = items.find(i => i.id === t);
+                                    const currentPreds = targetTask.predecessors || [];
+                                    if (currentPreds.includes(s)) return;
+                                    const newItems = items.map(i => i.id === t ? { ...i, predecessors: [...currentPreds, s] } : i);
+                                    updateState(newItems, s, true);
+                                }} 
+                                handleRemoveDependencies={(t, specific) => {
+                                    const newItems = items.map(i => {
+                                        if (specific) {
+                                            if (i.id === t) return { ...i, predecessors: (i.predecessors || []).filter(p => p !== specific) };
+                                            return i;
+                                        } else {
+                                            let newP = i.predecessors || [];
+                                            if (i.id === t) newP = [];
+                                            else newP = newP.filter(p => p !== t);
+                                            return { ...i, predecessors: newP };
+                                        }
+                                    });
+                                    updateState(newItems, null, true);
+                                }}
+                                frozenColumn={frozenColumn} setFrozenColumn={setFrozenColumn} picFilter={picFilter} statusFilter={statusFilter}
                                 handleAddNewRoot={handleAddNewRoot}
                             />
                         )}
